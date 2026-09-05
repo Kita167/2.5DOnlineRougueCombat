@@ -4,11 +4,12 @@ using UnityEngine;
 namespace ProjectRelay.Gameplay.Player
 {
     /// <summary>
-    /// 消费玩家输入并协调相机相对方向计算与 PlayerMotor。
+    /// 消费玩家输入并协调相机相对方向、角色朝向与 PlayerMotor。
     /// 本组件不拥有 Input Actions，也不直接修改玩家 Transform。
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerMotor))]
+    [RequireComponent(typeof(PlayerFacingController))]
     public sealed class PlayerController : MonoBehaviour
     {
         [SerializeField]
@@ -18,6 +19,10 @@ namespace ProjectRelay.Gameplay.Player
         [SerializeField]
         [Tooltip("负责执行 CharacterController 位移的玩家 Motor。")]
         private PlayerMotor mMotor;
+
+        [SerializeField]
+        [Tooltip("负责根据最终移动方向旋转玩家的朝向组件。")]
+        private PlayerFacingController mFacingController;
 
         private IPlayerInputSource mInputSource;
         private Camera mGameplayCamera;
@@ -29,13 +34,18 @@ namespace ProjectRelay.Gameplay.Player
         public bool IsInitialized { get; private set; }
 
         /// <summary>
-        /// 缓存同对象上的 PlayerMotor，并尽早报告缺失的移动配置。
+        /// 缓存同对象上的 Motor 和朝向组件，并尽早报告缺失的移动配置。
         /// </summary>
         private void Awake()
         {
             if (mMotor == null)
             {
                 mMotor = GetComponent<PlayerMotor>();
+            }
+
+            if (mFacingController == null)
+            {
+                mFacingController = GetComponent<PlayerFacingController>();
             }
 
             if (mMovementDefinition == null)
@@ -58,7 +68,7 @@ namespace ProjectRelay.Gameplay.Player
         }
 
         /// <summary>
-        /// 每帧把本地移动输入转换为世界速度，并让 PlayerMotor 处理位移、重力和碰撞。
+        /// 每帧把本地移动输入转换为世界方向，更新角色朝向并让 PlayerMotor 处理实际移动。
         /// </summary>
         private void Update()
         {
@@ -79,6 +89,11 @@ namespace ProjectRelay.Gameplay.Player
                 _cameraTransform.right);
 
             Vector3 _horizontalVelocity = _worldDirection * mMovementDefinition.MoveSpeed;
+
+            mFacingController.TickFacing(
+                _worldDirection,
+                mMovementDefinition.RotationSpeed,
+                Time.deltaTime);
 
             mMotor.TickMovement(
                 _horizontalVelocity,
@@ -124,9 +139,11 @@ namespace ProjectRelay.Gameplay.Player
                 return false;
             }
 
-            if (mMovementDefinition == null || mMotor == null)
+            if (mMovementDefinition == null || mMotor == null || mFacingController == null)
             {
-                Debug.LogError("[Gameplay] PlayerController 初始化失败：移动配置或 Motor 缺失。", this);
+                Debug.LogError(
+                    "[Gameplay] PlayerController 初始化失败：移动配置、Motor 或 FacingController 缺失。",
+                    this);
                 return false;
             }
 

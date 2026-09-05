@@ -240,6 +240,8 @@ Assets/ProjectRelay/Scripts/Tests/
 
 ### Step 2：完成朝向与相机跟随
 
+> 当前状态：代码已完成并通过编译；等待 Unity Editor 添加组件、搭建 CameraRig 并绑定引用后进行本步验收。
+
 #### 本步结果
 
 玩家朝当前移动方向平滑旋转，相机平滑跟随玩家。

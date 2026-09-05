@@ -1,5 +1,6 @@
 using ProjectRelay.Gameplay.Player;
 using ProjectRelay.Input;
+using ProjectRelay.Presentation.Camera;
 using UnityEngine;
 
 namespace ProjectRelay.Dev
@@ -23,6 +24,10 @@ namespace ProjectRelay.Dev
         [Tooltip("用于计算相机相对移动方向的 Gameplay Camera。")]
         private Camera mGameplayCamera;
 
+        [SerializeField]
+        [Tooltip("BattleSandbox 中负责跟随本地玩家的 CameraRig 控制器。")]
+        private TopDownCameraController mCameraController;
+
         private bool mIsInstalled;
 
         /// <summary>
@@ -30,15 +35,24 @@ namespace ProjectRelay.Dev
         /// </summary>
         private void Start()
         {
-            if (mPlayerController == null || mInputSource == null || mGameplayCamera == null)
+            if (
+                mPlayerController == null ||
+                mInputSource == null ||
+                mGameplayCamera == null ||
+                mCameraController == null)
             {
                 Debug.LogError(
-                    "[Gameplay] BattleSandboxInstaller 缺少 PlayerController、InputSource 或 Camera 引用。",
+                    "[Gameplay] BattleSandboxInstaller 缺少 PlayerController、InputSource、Camera 或 CameraController 引用。",
                     this);
                 return;
             }
 
             mIsInstalled = mPlayerController.Initialize(mInputSource, mGameplayCamera);
+
+            if (mIsInstalled)
+            {
+                mIsInstalled = mCameraController.Bind(mPlayerController.transform);
+            }
 
             if (mIsInstalled)
             {
@@ -53,6 +67,11 @@ namespace ProjectRelay.Dev
         {
             if (mIsInstalled && mPlayerController != null)
             {
+                if (mCameraController != null)
+                {
+                    mCameraController.Bind(mPlayerController.transform);
+                }
+
                 mPlayerController.SetControlEnabled(true);
             }
         }
@@ -65,6 +84,11 @@ namespace ProjectRelay.Dev
             if (mIsInstalled && mPlayerController != null)
             {
                 mPlayerController.SetControlEnabled(false);
+            }
+
+            if (mCameraController != null)
+            {
+                mCameraController.Unbind();
             }
         }
     }
