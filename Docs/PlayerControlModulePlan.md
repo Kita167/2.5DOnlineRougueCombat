@@ -1,6 +1,6 @@
 # Project Relay 玩家控制模块细则开发计划
 
-> 文档版本：v2.0  
+> 文档版本：v2.1  
 > 更新日期：2026-09-05  
 > 对应总体规划：M1 玩家控制基础  
 > 前置条件：Input 接入层已完成
@@ -33,11 +33,11 @@ Attack 和 Interact 留给后续模块使用。
 - 相机相对的 XZ 平面移动方向。
 - 贴地、重力、最大下落速度和墙体碰撞。
 - 玩家跟随移动方向旋转；无移动输入时保持最后朝向。
-- `Free`、`Dashing`、`Disabled` 三种动作状态。
+- `Free`、`Dashing`、`Disabled` 三种移动状态。
 - 冲刺方向、持续时间、冷却和撞墙提前结束。
 - 俯视角相机平滑跟随。
 - BattleSandbox 中的玩家 Prefab、地面和障碍测试环境。
-- 基础动画参数输出和自动化测试。
+- 基础动画参数输出和手动验收。
 
 ### 1.3 本次不实现
 
@@ -60,9 +60,9 @@ LocalPlayerInputSource
         ▼
 PlayerController
         ├── 将 Move 转换为相机相对世界方向
-        ├── 将 Dash 输入提交给动作状态机
+        ├── 将 Dash 输入提交给移动状态机
         ▼
-PlayerActionStateMachine
+PlayerLocomotionStateMachine
         ├── Free：输出普通移动速度
         ├── Dashing：输出锁定方向的冲刺速度
         └── Disabled：输出零水平速度
@@ -77,12 +77,13 @@ TopDownCameraController ← 玩家 Transform
 
 ### 2.2 固定技术选择
 
-- `PlayerController` 只协调模块，不直接操作 Transform。
+- `PlayerController` 是玩家控制入口，只协调输入和各子模块，不直接操作 Transform，也不承载技能、伤害等业务规则。
 - `PlayerMotor` 不读取 Input System，只接收已经计算好的水平速度。
 - 使用 `Update` 驱动 `CharacterController`，不用 `FixedUpdate`。
-- 状态机使用一个普通 C# 类和一个 enum；当前不为三个简单状态分别建立状态类。
+- `PlayerLocomotionStateMachine` 使用一个普通 C# 类和一个 enum；当前不为三个简单移动状态分别建立状态类。
+- 技能系统后续单独管理施放阶段，并通过“是否允许移动/冲刺、速度倍率和朝向覆盖”等约束与玩家移动协调，不把技能状态塞入移动状态机。
 - 所有移动统一经过 `CharacterController.Move`。
-- 设计参数保存在只读的 `PlayerMovementDefinition` 中，冷却和计时保存在运行时状态中。
+- 设计参数保存在只读的 `PlayerMovementConfig` 中，冷却和计时保存在运行时状态中。
 - 相机由场景持有，通过 `BattleSandboxInstaller` 绑定玩家，不放入玩家 Prefab。
 
 ### 2.3 初始参数
@@ -116,14 +117,14 @@ Assets/ProjectRelay/Scripts/Runtime/Gameplay/Player/
 
 | 脚本 | 职责 |
 | --- | --- |
-| `PlayerMovementDefinition.cs` | 保存移动、重力、旋转和冲刺设计参数 |
+| `PlayerMovementConfig.cs` | 保存移动、重力、旋转和冲刺设计参数 |
 | `PlayerMovementMath.cs` | 提供相机相对方向和输入归一化的纯计算 |
 | `PlayerMotor.cs` | 包装 CharacterController，执行位移、贴地、重力和碰撞 |
 | `PlayerFacingController.cs` | 根据移动或冲刺方向平滑旋转玩家 |
-| `PlayerActionState.cs` | 定义 Free、Dashing、Disabled |
-| `PlayerActionStateMachine.cs` | 管理状态、Dash 计时、冷却和速度输出 |
-| `PlayerController.cs` | 消费 Input Source 并协调 State、Motor 和 Facing |
-| `PlayerAnimationPresenter.cs` | 将实际速度和动作状态写入 Animator |
+| `PlayerLocomotionState.cs` | 定义 Free、Dashing、Disabled 移动状态 |
+| `PlayerLocomotionStateMachine.cs` | 管理移动状态、Dash 计时、冷却和速度输出 |
+| `PlayerController.cs` | 消费 Input Source 并协调 Locomotion State、Motor 和 Facing |
+| `PlayerAnimationPresenter.cs` | 将实际速度和移动状态写入 Animator |
 
 ### 3.2 场景辅助代码
 
@@ -139,14 +140,6 @@ Assets/ProjectRelay/Scripts/Runtime/Dev/
 | --- | --- |
 | `TopDownCameraController.cs` | 在 LateUpdate 平滑跟随当前玩家 |
 | `BattleSandboxInstaller.cs` | 将场景 Camera、CameraRig、Input Source 和玩家控制器连接起来 |
-
-### 3.3 测试代码
-
-```text
-Assets/ProjectRelay/Scripts/Tests/
-├── EditMode/PlayerMovementMathTests.cs
-└── PlayMode/PlayerControlPlayModeTests.cs
-```
 
 ---
 
@@ -164,7 +157,7 @@ Assets/ProjectRelay/Scripts/Tests/
 
 新建：
 
-- `PlayerMovementDefinition.cs`
+- `PlayerMovementConfig.cs`
 - `PlayerMovementMath.cs`
 - `PlayerMotor.cs`
 - `PlayerController.cs`
@@ -260,9 +253,9 @@ Assets/ProjectRelay/Scripts/Tests/
 
 实现要点：
 
-- 移动方向长度超过最小阈值时更新最后有效朝向。
-- 无移动输入时保持最后朝向。
-- 使用 `Quaternion.RotateTowards`，旋转速度来自 Definition。
+- 移动方向长度超过最小阈值时，朝向节点按配置角速度向目标方向插值旋转。
+- 无移动输入时保持朝向节点的实际当前旋转。
+- 使用 `Quaternion.RotateTowards`，旋转速度来自 Config。
 - CameraRig 在 `LateUpdate` 跟随，避免比玩家 Update 更早更新造成抖动。
 - Camera Target 必须支持显式 Bind/Unbind。
 
@@ -296,7 +289,9 @@ Assets/ProjectRelay/Scripts/Tests/
 
 ---
 
-### Step 3：完成动作状态机与冲刺
+### Step 3：完成移动状态机与冲刺
+
+> 当前状态：代码已完成并通过编译；等待 Unity Editor 检查引用并完成空旷、正面撞墙和斜角撞墙验收。
 
 #### 本步结果
 
@@ -306,8 +301,8 @@ Assets/ProjectRelay/Scripts/Tests/
 
 新建：
 
-- `PlayerActionState.cs`
-- `PlayerActionStateMachine.cs`
+- `PlayerLocomotionState.cs`
+- `PlayerLocomotionStateMachine.cs`
 
 修改：
 
@@ -320,7 +315,7 @@ Assets/ProjectRelay/Scripts/Tests/
 - Free 输出普通移动速度。
 - Dashing 输出进入状态时锁定的方向和 Dash Speed。
 - Disabled 输出零水平速度并拒绝 Dash。
-- Dash 方向优先使用当前移动方向；没有移动时使用最后朝向。
+- Dash 方向优先使用当前移动方向；没有移动时读取朝向节点经过插值后的实际当前朝向。
 - Dash 输入最多缓存 `0.10s`。
 - Dash 在 `0.18s` 后结束，冷却从结束时开始。
 - Dash 遇到侧面碰撞且沿冲刺方向的实际速度明显不足时提前结束。
@@ -329,7 +324,7 @@ Assets/ProjectRelay/Scripts/Tests/
 
 #### Editor 配合
 
-1. 确认 PlayerController 引用了 PlayerMovementDefinition、PlayerMotor 和 PlayerFacingController。
+1. 确认 PlayerController 引用了 PlayerMovementConfig、PlayerMotor 和 PlayerFacingController。
 2. 在空旷区域测试理论 Dash 距离。
 3. 分别正面和斜角冲向墙体。
 4. 如需调整手感，只修改 `PlayerMovement_Default.asset`。
@@ -345,48 +340,42 @@ Assets/ProjectRelay/Scripts/Tests/
 
 ---
 
-### Step 4：完成表现和测试
+### Step 4：完成动画参数输出与最终验收
+
+> 当前状态：核心动画参数输出代码已完成；Animator 配置和 Profiler 采样保留为 Editor 验收项。
 
 #### 本步结果
 
-玩家状态可以驱动动画参数，核心移动与 Dash 行为具备自动化回归测试。
+玩家移动状态可以驱动动画参数，并在 BattleSandbox 中完成最终手动验收。
 
 #### 涉及脚本
 
 新建：
 
 - `PlayerAnimationPresenter.cs`
-- `PlayerMovementMathTests.cs`
-- `PlayerControlPlayModeTests.cs`
-- EditMode 和 PlayMode 测试 asmdef。
+
+修改：
+
+- `PlayerController.cs`
 
 Presenter 输出：
 
 - `Speed`：当前实际水平速度归一化值。
 - `IsDashing`：当前是否处于 Dashing。
 
-测试内容：
-
-- 相机相对方向计算正确。
-- 斜向输入长度不超过 1。
-- 普通移动距离不依赖目标帧率。
-- Disabled 状态没有水平位移。
-- Dash 持续时间和空旷距离符合配置。
-- 冷却期间拒绝 Dash。
-- Dash 撞墙后退出。
-- ForceReset 清理状态和计时器。
-- Camera Target 销毁后安全解绑。
-
 #### Editor 配合
 
-- 如果已有 Animator，为 Animator Controller 添加 `Speed` 和 `IsDashing` 参数，并挂载 Presenter。
-- 如果暂时没有角色动画，只保留 Presenter 代码，不把 Animator 作为本模块验收阻塞项。
-- 在 Test Runner 中运行 EditMode 和 PlayMode 测试。
-- 在 Profiler 中检查稳定移动时是否存在每帧 GC Alloc。
+1. 在玩家模型子节点添加 `Animator`，在玩家根节点添加 `PlayerAnimationPresenter`；只有一个 Animator 时两个引用可以留空自动查找。
+2. Animator Controller 添加 `Speed`（Float）和 `IsDashing`（Bool），名称与类型必须完全一致。
+3. 用 `Speed` 驱动 Idle/Move 的 1D Blend Tree：Idle 阈值为 `0`，Move 阈值为 `1`。
+4. Locomotion → Dash 使用 `IsDashing == true`；Dash → Locomotion 使用 `IsDashing == false`。两条过渡关闭 Has Exit Time，Transition Duration 建议 `0.05s`。
+5. 关闭 Animator 的 Apply Root Motion，实际位移仍由 `CharacterController` 负责。
+6. 如果暂时没有角色动画，只保留 Presenter 代码，不把 Animator 作为本模块验收阻塞项。
+7. 在 Profiler 中检查稳定移动时是否存在每帧 GC Alloc。
 
 #### 本步检查
 
-- 自动化测试全部通过。
+- Animator 参数会随移动和冲刺状态正确变化。
 - 没有 Animator 时玩家控制仍能正常运行。
 - 重复进入和退出 Play Mode 不会产生输入或状态倍增。
 
@@ -401,12 +390,12 @@ Presenter 输出：
 - [ ] 玩家平滑面向当前移动方向。
 - [ ] 相机稳定跟随，无明显抖动。
 - [ ] Free、Dashing、Disabled 状态可以正确切换。
-- [ ] Dash 距离、持续时间和冷却符合 Definition。
+- [ ] Dash 距离、持续时间和冷却符合 Config。
 - [ ] Dash 撞墙后能够恢复控制。
 - [ ] 禁用、启用和场景退出会清除临时状态。
 - [ ] 连续重载 BattleSandbox 10 次无异常。
 - [ ] 稳定移动时没有每帧 GC Alloc。
-- [ ] 自动化测试通过，Console 无 Error。
-- [ ] Input、Motor、State、Facing 和 Camera 职责没有互相越界。
+- [ ] Console 无 Error。
+- [ ] Input、Motor、Locomotion State、Facing 和 Camera 职责没有互相越界。
 
-完成本计划后，玩家控制模块停止增加功能。下一阶段在现有 `PlayerController` 和动作状态机上接入普通攻击，但伤害计算不得写入本模块。
+完成本计划后，玩家移动模块停止增加功能。下一阶段新增独立的技能/战斗控制器，由 `PlayerController` 转发输入并协调移动约束；伤害与技能阶段不得写入移动状态机。

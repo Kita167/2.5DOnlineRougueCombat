@@ -4,8 +4,9 @@ using UnityEngine;
 namespace ProjectRelay.Gameplay.Player
 {
     /// <summary>
-    /// 消费玩家输入并协调相机相对方向、角色朝向与 PlayerMotor。
+    /// 消费玩家输入并协调相机相对方向、移动状态、角色朝向与 PlayerMotor。
     /// 本组件不拥有 Input Actions，也不直接修改玩家 Transform。
+    /// 后续只负责把技能输入和移动约束交给独立模块，不承载技能或伤害规则。
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerMotor))]
@@ -14,7 +15,7 @@ namespace ProjectRelay.Gameplay.Player
     {
         [SerializeField]
         [Tooltip("玩家普通移动和垂直运动使用的设计参数。")]
-        private PlayerMovementDefinition mMovementDefinition;
+        private PlayerMovementConfig mMovementConfig;
 
         [SerializeField]
         [Tooltip("负责执行 CharacterController 位移的玩家 Motor。")]
@@ -26,12 +27,47 @@ namespace ProjectRelay.Gameplay.Player
 
         private IPlayerInputSource mInputSource;
         private Camera mGameplayCamera;
+        private PlayerActionStateMachine mActionStateMachine;
         private bool mIsControlEnabled;
 
         /// <summary>
         /// 获取控制器是否已经绑定输入源和 Gameplay Camera。
         /// </summary>
         public bool IsInitialized { get; private set; }
+
+        /// <summary>
+        /// 获取玩家当前移动状态，供动画表现和只读观察者使用。
+        /// </summary>
+        public PlayerActionState CurrentActionState =>
+            mActionStateMachine != null
+                ? mActionStateMachine.CurrentState
+                : PlayerActionState.Disabled;
+
+        /// <summary>
+        /// 获取实际水平速度相对当前状态目标速度的 0 到 1 归一化值。
+        /// </summary>
+        public float NormalizedHorizontalSpeed
+        {
+            get
+            {
+                if (mMotor == null || mMovementConfig == null)
+                {
+                    return 0.0f;
+                }
+
+                float _referenceSpeed =
+                    CurrentActionState == PlayerActionState.Dashing
+                    ? mMovementConfig.DashSpeed
+                    : mMovementConfig.MoveSpeed;
+
+                if (_referenceSpeed <= Mathf.Epsilon)
+                {
+                    return 0.0f;
+                }
+
+                return Mathf.Clamp01(mMotor.HorizontalVelocity.magnitude / _referenceSpeed);
+            }
+        }
 
         /// <summary>
         /// 缓存同对象上的 Motor 和朝向组件，并尽早报告缺失的移动配置。
@@ -48,12 +84,15 @@ namespace ProjectRelay.Gameplay.Player
                 mFacingController = GetComponent<PlayerFacingController>();
             }
 
-            if (mMovementDefinition == null)
+            if (mMovementConfig == null)
             {
                 Debug.LogError(
-                    "[Gameplay] PlayerController 缺少 PlayerMovementDefinition。",
+                    "[Gameplay] PlayerController 缺少 PlayerMovementConfig。",
                     this);
+                return;
             }
+
+            mActionStateMachine = new PlayerActionStateMachine(mMovementConfig);
         }
 
         /// <summary>
@@ -64,6 +103,7 @@ namespace ProjectRelay.Gameplay.Player
             if (IsInitialized)
             {
                 mInputSource.SetInputEnabled(mIsControlEnabled);
+                mActionStateMachine.SetEnabled(mIsControlEnabled);
             }
         }
 
@@ -72,15 +112,23 @@ namespace ProjectRelay.Gameplay.Player
         /// </summary>
         private void Update()
         {
-            if (!IsInitialized || mMovementDefinition == null || mMotor == null)
+            if (
+                !IsInitialized ||
+                mMovementConfig == null ||
+                mMotor == null ||
+                mFacingController == null ||
+                mActionStateMachine == null ||
+                mGameplayCamera == null)
             {
                 return;
             }
 
+            bool _canReadInput = mIsControlEnabled && mInputSource.IsEnabled;
             Vector2 _moveInput =
-                mIsControlEnabled && mInputSource.IsEnabled
+                _canReadInput
                     ? mInputSource.Move
                     : Vector2.zero;
+            bool _dashPressed = _canReadInput && mInputSource.ConsumeDashPressed();
 
             Transform _cameraTransform = mGameplayCamera.transform;
             Vector3 _worldDirection = PlayerMovementMath.GetCameraRelativeDirection(
@@ -88,19 +136,27 @@ namespace ProjectRelay.Gameplay.Player
                 _cameraTransform.forward,
                 _cameraTransform.right);
 
-            Vector3 _horizontalVelocity = _worldDirection * mMovementDefinition.MoveSpeed;
+            Vector3 _horizontalVelocity = mActionStateMachine.Tick(
+                _worldDirection,
+                mFacingController.CurrentFacingDirection,
+                _dashPressed,
+                Time.deltaTime);
 
             mFacingController.TickFacing(
-                _worldDirection,
-                mMovementDefinition.RotationSpeed,
+                _horizontalVelocity,
+                mMovementConfig.RotationSpeed,
                 Time.deltaTime);
 
             mMotor.TickMovement(
                 _horizontalVelocity,
-                mMovementDefinition.Gravity,
-                mMovementDefinition.MaximumFallSpeed,
-                mMovementDefinition.GroundedVerticalSpeed,
+                mMovementConfig.Gravity,
+                mMovementConfig.MaximumFallSpeed,
+                mMovementConfig.GroundedVerticalSpeed,
                 Time.deltaTime);
+
+            mActionStateMachine.ReportMovementResult(
+                mMotor.HorizontalVelocity,
+                mMotor.LastCollisionFlags);
         }
 
         /// <summary>
@@ -116,6 +172,11 @@ namespace ProjectRelay.Gameplay.Player
             if (mMotor != null)
             {
                 mMotor.ResetMotion();
+            }
+
+            if (mActionStateMachine != null)
+            {
+                mActionStateMachine.ForceReset();
             }
         }
 
@@ -139,10 +200,14 @@ namespace ProjectRelay.Gameplay.Player
                 return false;
             }
 
-            if (mMovementDefinition == null || mMotor == null || mFacingController == null)
+            if (
+                mMovementConfig == null ||
+                mMotor == null ||
+                mFacingController == null ||
+                mActionStateMachine == null)
             {
                 Debug.LogError(
-                    "[Gameplay] PlayerController 初始化失败：移动配置、Motor 或 FacingController 缺失。",
+                    "[Gameplay] PlayerController 初始化失败：移动依赖未就绪。",
                     this);
                 return false;
             }
@@ -150,7 +215,11 @@ namespace ProjectRelay.Gameplay.Player
             mInputSource = _inputSource;
             mGameplayCamera = _gameplayCamera;
             IsInitialized = true;
-            mInputSource.SetInputEnabled(mIsControlEnabled && isActiveAndEnabled);
+            mActionStateMachine.ForceReset();
+
+            bool _shouldEnableControl = mIsControlEnabled && isActiveAndEnabled;
+            mInputSource.SetInputEnabled(_shouldEnableControl);
+            mActionStateMachine.SetEnabled(_shouldEnableControl);
             return true;
         }
 
@@ -167,7 +236,9 @@ namespace ProjectRelay.Gameplay.Player
                 return;
             }
 
-            mInputSource.SetInputEnabled(_isEnabled && isActiveAndEnabled);
+            bool _shouldEnableControl = _isEnabled && isActiveAndEnabled;
+            mInputSource.SetInputEnabled(_shouldEnableControl);
+            mActionStateMachine.SetEnabled(_shouldEnableControl);
 
             if (!_isEnabled && mMotor != null)
             {

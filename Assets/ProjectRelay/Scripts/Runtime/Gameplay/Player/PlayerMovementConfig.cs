@@ -8,8 +8,8 @@ namespace ProjectRelay.Gameplay.Player
     /// </summary>
     [CreateAssetMenu(
         fileName = "PlayerMovement_Default",
-        menuName = "Project Relay/Gameplay/Player Movement Definition")]
-    public sealed class PlayerMovementDefinition : ScriptableObject
+        menuName = "Project Relay/Gameplay/Player Movement Config")]
+    public sealed class PlayerMovementConfig : ScriptableObject
     {
         [Header("Horizontal Movement")]
         [SerializeField]

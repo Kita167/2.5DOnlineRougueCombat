@@ -294,7 +294,7 @@ Attack/Skill Intent
 
 | Definition | 关键字段 |
 | --- | --- |
-| `PlayerMovementDefinition` | 移速、旋转速度、重力、冲刺速度/时长/冷却 |
+| `PlayerMovementConfig` | 移速、旋转速度、重力、冲刺速度/时长/冷却 |
 | `BasicAttackDefinition` | 前摇、命中窗口、后摇、范围、伤害、冷却 |
 | `ActiveSkillDefinition` | 稳定 ID、释放时序、范围、伤害、冷却、表现引用占位 |
 | `EnemyDefinition` | 最大生命、移速、攻击距离、攻击配置、奖励值 |

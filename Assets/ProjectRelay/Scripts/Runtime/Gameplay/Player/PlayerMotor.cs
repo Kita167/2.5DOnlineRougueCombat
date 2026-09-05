@@ -64,6 +64,7 @@ namespace ProjectRelay.Gameplay.Player
             {
                 HorizontalVelocity = Vector3.zero;
                 IsGrounded = mCharacterController.isGrounded;
+                LastCollisionFlags = CollisionFlags.None;
                 return;
             }
 
