@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 28a4d63b76f93ee4bb9cc016fa8c9667, type: 3}
+  m_Name: PlayerMovement_Default
+  m_EditorClassIdentifier: Game.Runtime::ProjectRelay.Gameplay.Player.PlayerMovementDefinition
+  mMoveSpeed: 5
+  mRotationSpeed: 720
+  mGravity: -25
+  mMaximumFallSpeed: -40
+  mGroundedVerticalSpeed: -2
+  mDashSpeed: 12
+  mDashDuration: 0.18
+  mDashCooldown: 0.8
+  mDashInputBuffer: 0.1
+  mEndDashWhenBlocked: 1
