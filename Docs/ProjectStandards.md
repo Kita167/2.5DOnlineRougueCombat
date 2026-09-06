@@ -1,7 +1,7 @@
 # Project Relay 项目开发规范
 
-> 文档版本：v1.0  
-> 生效日期：2026-09-05  
+> 文档版本：v1.1
+> 生效日期：2026-09-06
 > 适用范围：项目自有代码、资源、场景、配置、测试与文档  
 > Unity 版本基线：`6000.3.23f1`
 
@@ -217,6 +217,16 @@ Scenes/Dev/NetworkSpike.unity
 - 不在 Prefab 中保存对场景对象的引用。
 - 视觉子对象放在 `VisualRoot` 下，规则组件不要通过深层 Transform 路径查找视觉对象。
 - 网络 Prefab 接入后，NetworkObject 放在明确的根节点，装饰性 VFX 不因此全部成为网络对象。
+
+### 3.6 代码代理与 Unity Editor 资产操作边界
+
+- 未经用户针对本次任务明确授权，代码代理只修改代码、测试、Assembly Definition 和文档。
+- 代码代理不得直接创建、修改、删除或移动 Scene、Prefab、ScriptableObject 资产、材质、动画、Animator Controller、Input Actions、Project Settings 等需要 Unity Editor 序列化的内容。
+- 禁止通过手写 YAML 或批量文本替换绕过 Unity Editor 修改上述资产。
+- 新增代码和 Assembly Definition 对应的 `.meta` 可以随文件创建；不得擅自改写已有资源 GUID 或其他 Unity 资产元数据。
+- 需要 Editor 配合时，代码代理必须交付明确的操作需求，至少写明目标对象、需要添加的组件、Inspector 字段赋值、Layer/Tag、场景放置和验收方法。
+- 只有用户明确要求代码代理操作某项 Unity 资产时，才允许在指定范围内修改；不得把一次授权扩展到后续任务或其他资产。
+- 功能计划必须将“代码实现”和“Editor 配合”分开列出，Editor 配合默认由用户执行，不得作为代码代理已完成内容标记。
 
 ---
 

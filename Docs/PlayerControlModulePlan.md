@@ -1,8 +1,9 @@
 # Project Relay 玩家控制模块细则开发计划
 
-> 文档版本：v2.1  
-> 更新日期：2026-09-05  
-> 对应总体规划：M1 玩家控制基础  
+> 文档版本：v2.2
+> 更新日期：2026-09-06
+> 对应总体规划：M1 玩家控制基础
+> 模块状态：已完成
 > 前置条件：Input 接入层已完成
 
 ---
@@ -60,9 +61,9 @@ LocalPlayerInputSource
         ▼
 PlayerController
         ├── 将 Move 转换为相机相对世界方向
-        ├── 将 Dash 输入提交给移动状态机
+        ├── 将 Dash 输入提交给 Action 状态机
         ▼
-PlayerLocomotionStateMachine
+PlayerActionStateMachine
         ├── Free：输出普通移动速度
         ├── Dashing：输出锁定方向的冲刺速度
         └── Disabled：输出零水平速度
@@ -80,8 +81,8 @@ TopDownCameraController ← 玩家 Transform
 - `PlayerController` 是玩家控制入口，只协调输入和各子模块，不直接操作 Transform，也不承载技能、伤害等业务规则。
 - `PlayerMotor` 不读取 Input System，只接收已经计算好的水平速度。
 - 使用 `Update` 驱动 `CharacterController`，不用 `FixedUpdate`。
-- `PlayerLocomotionStateMachine` 使用一个普通 C# 类和一个 enum；当前不为三个简单移动状态分别建立状态类。
-- 技能系统后续单独管理施放阶段，并通过“是否允许移动/冲刺、速度倍率和朝向覆盖”等约束与玩家移动协调，不把技能状态塞入移动状态机。
+- `PlayerActionStateMachine` 使用一个普通 C# 类和一个 enum；M1 只包含 `Free`、`Dashing`、`Disabled`，不分别建立状态类。
+- 普通攻击和受击等互斥动作后续扩展到 Action State；技能系统独立管理施放阶段，通过移动、冲刺、速度倍率和朝向约束与 Action State 协调。
 - 所有移动统一经过 `CharacterController.Move`。
 - 设计参数保存在只读的 `PlayerMovementConfig` 中，冷却和计时保存在运行时状态中。
 - 相机由场景持有，通过 `BattleSandboxInstaller` 绑定玩家，不放入玩家 Prefab。
@@ -121,9 +122,9 @@ Assets/ProjectRelay/Scripts/Runtime/Gameplay/Player/
 | `PlayerMovementMath.cs` | 提供相机相对方向和输入归一化的纯计算 |
 | `PlayerMotor.cs` | 包装 CharacterController，执行位移、贴地、重力和碰撞 |
 | `PlayerFacingController.cs` | 根据移动或冲刺方向平滑旋转玩家 |
-| `PlayerLocomotionState.cs` | 定义 Free、Dashing、Disabled 移动状态 |
-| `PlayerLocomotionStateMachine.cs` | 管理移动状态、Dash 计时、冷却和速度输出 |
-| `PlayerController.cs` | 消费 Input Source 并协调 Locomotion State、Motor 和 Facing |
+| `PlayerActionState.cs` | 定义 M1 使用的 Free、Dashing、Disabled 动作状态 |
+| `PlayerActionStateMachine.cs` | 管理动作状态、Dash 计时、冷却和速度输出 |
+| `PlayerController.cs` | 消费 Input Source 并协调 Action State、Motor 和 Facing |
 | `PlayerAnimationPresenter.cs` | 将实际速度和移动状态写入 Animator |
 
 ### 3.2 场景辅助代码
@@ -147,7 +148,7 @@ Assets/ProjectRelay/Scripts/Runtime/Dev/
 
 ### Step 1：完成普通移动
 
-> 当前状态：代码已完成并通过编译；等待 Unity Editor 场景、Prefab、Layer 和引用配置后进行本步验收。
+> 当前状态：已完成并通过验收。
 
 #### 本步结果
 
@@ -233,7 +234,7 @@ Assets/ProjectRelay/Scripts/Runtime/Dev/
 
 ### Step 2：完成朝向与相机跟随
 
-> 当前状态：代码已完成并通过编译；等待 Unity Editor 添加组件、搭建 CameraRig 并绑定引用后进行本步验收。
+> 当前状态：已完成并通过验收。
 
 #### 本步结果
 
@@ -289,9 +290,9 @@ Assets/ProjectRelay/Scripts/Runtime/Dev/
 
 ---
 
-### Step 3：完成移动状态机与冲刺
+### Step 3：完成 Action 状态机与冲刺
 
-> 当前状态：代码已完成并通过编译；等待 Unity Editor 检查引用并完成空旷、正面撞墙和斜角撞墙验收。
+> 当前状态：已完成并通过验收。
 
 #### 本步结果
 
@@ -301,8 +302,8 @@ Assets/ProjectRelay/Scripts/Runtime/Dev/
 
 新建：
 
-- `PlayerLocomotionState.cs`
-- `PlayerLocomotionStateMachine.cs`
+- `PlayerActionState.cs`
+- `PlayerActionStateMachine.cs`
 
 修改：
 
@@ -342,7 +343,7 @@ Assets/ProjectRelay/Scripts/Runtime/Dev/
 
 ### Step 4：完成动画参数输出与最终验收
 
-> 当前状态：核心动画参数输出代码已完成；Animator 配置和 Profiler 采样保留为 Editor 验收项。
+> 当前状态：核心动画参数输出和无 Animator 降级路径已完成并通过验收。
 
 #### 本步结果
 
@@ -383,19 +384,21 @@ Presenter 输出：
 
 ## 5. 最终验收
 
-- [ ] 键盘和手柄均可控制移动。
-- [ ] 移动方向为相机相对方向。
-- [ ] 斜向移动速度与直线一致。
-- [ ] 角色正确贴地，不穿过地面或障碍。
-- [ ] 玩家平滑面向当前移动方向。
-- [ ] 相机稳定跟随，无明显抖动。
-- [ ] Free、Dashing、Disabled 状态可以正确切换。
-- [ ] Dash 距离、持续时间和冷却符合 Config。
-- [ ] Dash 撞墙后能够恢复控制。
-- [ ] 禁用、启用和场景退出会清除临时状态。
-- [ ] 连续重载 BattleSandbox 10 次无异常。
-- [ ] 稳定移动时没有每帧 GC Alloc。
-- [ ] Console 无 Error。
-- [ ] Input、Motor、Locomotion State、Facing 和 Camera 职责没有互相越界。
+- [x] 键盘和手柄均可控制移动。
+- [x] 移动方向为相机相对方向。
+- [x] 斜向移动速度与直线一致。
+- [x] 角色正确贴地，不穿过地面或障碍。
+- [x] 玩家平滑面向当前移动方向。
+- [x] 相机稳定跟随，无明显抖动。
+- [x] Free、Dashing、Disabled 状态可以正确切换。
+- [x] Dash 距离、持续时间和冷却符合 Config。
+- [x] Dash 撞墙后能够恢复控制。
+- [x] 禁用、启用和场景退出会清除临时状态。
+- [x] 连续重载 BattleSandbox 10 次无异常。
+- [x] 稳定移动时没有每帧 GC Alloc。
+- [x] Console 无 Error。
+- [x] Input、Motor、Action State、Facing 和 Camera 职责没有互相越界。
 
-完成本计划后，玩家移动模块停止增加功能。下一阶段新增独立的技能/战斗控制器，由 `PlayerController` 转发输入并协调移动约束；伤害与技能阶段不得写入移动状态机。
+验收结论：M1 核心功能和人工验证已完成。阶段性测试代码未保留；后续模块仍按项目规范在实现阶段建立对应测试。
+
+完成本计划后，玩家移动模块停止增加功能。下一阶段新增独立的战斗控制器，由 `PlayerController` 转发输入并协调动作与移动约束；命中、伤害和技能执行不得写入 Action 状态机。
