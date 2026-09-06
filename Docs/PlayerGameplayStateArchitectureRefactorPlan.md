@@ -2,7 +2,7 @@
 
 > 适用目标：2 人联机、俯视角动作 Roguelike；预计包含多段攻击、主动技能、冲刺、击退、眩晕、中毒、Buff/Debuff、Boss 与普通敌人。
 >
-> 本计划以当前代码为迁移起点，但不把现有实现视为必须保留的架构约束。计划只描述重构目标、边界和落地顺序，不在本阶段修改运行时代码。
+> 本计划以原有代码为迁移起点，但不把旧实现视为必须保留的架构约束。2026-09-06 已完成 Player 基础控制 FSM 的落地和旧状态机删除；Ability、Effect、Alive/Dead 与网络阶段仍按本文后续边界推进。
 
 ## 1. 结论与架构决策
 
@@ -112,7 +112,7 @@ Stateless 是成熟的 .NET 状态机库，支持层级状态、Trigger、Guard�
 
 本计划借鉴这些概念，但实现一个更小的 Unity/C# 子集：
 
-- `AbilityDefinition` 与 `AbilityExecution` 分离；
+- `AbilityConfig` 与 `AbilityExecution` 分离；
 - Required / Blocked / Granted / Cancel Tags；
 - 持续或周期性的 Gameplay Effects；
 - 每次激活具有稳定的 `ActivationId`；
@@ -166,7 +166,7 @@ Assets/ProjectRelay/Scripts/Runtime/Gameplay/
 │       └── DashRuntime.cs
 ├── Abilities/
 │   ├── AbilitySystem.cs
-│   ├── AbilityDefinition.cs
+│   ├── AbilityConfig.cs
 │   ├── AbilitySpec.cs
 │   ├── AbilityExecution.cs
 │   ├── AbilityActivationRequest.cs
@@ -179,7 +179,7 @@ Assets/ProjectRelay/Scripts/Runtime/Gameplay/
 │   └── Targeting/
 ├── Effects/
 │   ├── GameplayEffectSystem.cs
-│   ├── GameplayEffectDefinition.cs
+│   ├── GameplayEffectConfig.cs
 │   ├── ActiveGameplayEffect.cs
 │   ├── EffectStackPolicy.cs
 │   └── EffectId.cs
@@ -346,7 +346,7 @@ CooldownEndTick = 150
 不要为每个技能向角色状态枚举添加 `FireballCasting`、`WhirlwindAttacking`。每个技能是一个 `AbilitySpec`，激活后创建一个 `AbilityExecution`：
 
 ```text
-AbilityDefinition：只读设计数据，ScriptableObject
+AbilityConfig：只读设计数据，ScriptableObject
 AbilitySpec：角色当前拥有的能力、等级、充能和冷却
 AbilityExecution：某一次激活的运行时数据
 AbilitySystem：验证请求、管理执行实例、取消和结束
@@ -383,7 +383,7 @@ AbilityActivationResult TryActivate(in AbilityActivationRequest request);
 5. 检查当前执行能否被新 Ability 取消。
 6. 分配非零 `AbilityActivationId`。
 7. 获取本次执行需要的 Capability Lease。
-8. 扣除资源并启动冷却；具体时点由 Definition 明确配置。
+8. 扣除资源并启动冷却；具体时点由 Config 明确配置。
 9. 创建并进入 `AbilityExecution`。
 10. 发布值类型 Gameplay Event，表现层据此播放动画/VFX。
 
@@ -407,7 +407,7 @@ StaleCommand
 多段攻击应是一个 Combo Ability 的执行数据，而不是三个角色顶层状态：
 
 ```text
-ComboAbilityDefinition
+ComboAbilityConfig
 └── Steps[]
     ├── Step 0: Windup / Active / Recovery / ComboOpenWindow
     ├── Step 1: Windup / Active / Recovery / ComboOpenWindow
@@ -472,7 +472,7 @@ Effect.Poison
 Effect.Slow
 ```
 
-Ability Definition 可以声明：
+Ability Config 可以声明：
 
 ```text
 RequiredOwnerTags
@@ -526,7 +526,7 @@ Lease 保存来源。只有所有者结束/取消或系统执行强制清理时�
 
 眩晕、中毒、减速不应成为同一状态机中的互斥状态，而应是可并存、可叠层、可过期的 Active Effects。
 
-`GameplayEffectDefinition` 至少包含：
+`GameplayEffectConfig` 至少包含：
 
 - `EffectId`
 - Duration Policy：Instant / Duration / Infinite
@@ -597,7 +597,7 @@ Death
 > Normal Movement
 ```
 
-优先级必须集中定义并测试。个别技能需要例外时，用 Definition/Policy 明确覆盖，不依赖代码调用顺序。
+优先级必须集中定义并测试。个别技能需要例外时，用 Config/Policy 明确覆盖，不依赖代码调用顺序。
 
 ## 11. 网络就绪设计
 
@@ -755,7 +755,7 @@ GameplayCueStarted / Stopped
 
 ### Phase 2：迁移 Locomotion
 
-目标：从当前 `PlayerActionStateMachine` 中取出 Free、Dash 和移动输出。
+状态：基础 Player 控制 FSM 已完成。本阶段原目标是从旧 `PlayerActionStateMachine` 中取出移动、Dash 和完整控制输出。
 
 任务：
 
@@ -780,7 +780,7 @@ GameplayCueStarted / Stopped
 任务：
 
 - 实现最小 `GameplayTagSet` 和 `CapabilityLockSet`。
-- 实现 `AbilityDefinition`、`AbilitySpec`、`AbilityExecution`、激活结果。
+- 实现 `AbilityConfig`、`AbilitySpec`、`AbilityExecution`、激活结果。
 - 将 `BasicAttackController` 迁移成第一个 Ability。
 - 将 Windup/Active/Recovery 与 Cooldown 分离。
 - 用 `ActivationId` 持有和释放动作锁。
@@ -799,7 +799,7 @@ GameplayCueStarted / Stopped
 
 任务：
 
-- 添加 Combo Definition、Step Runtime、Input Window 和 Commit Point。
+- 添加 Combo Config、Step Runtime、Input Window 和 Commit Point。
 - 添加下一段输入缓存与超时。
 - 添加每段独立 Motion Policy、朝向 Policy、命中定义和取消窗口。
 - Snapshot 包含 Step、Phase、PhaseEndTick 和 ActivationId。
@@ -807,7 +807,7 @@ GameplayCueStarted / Stopped
 
 验收：
 
-- 增加第四段攻击只需增加 Definition 数据或专用 Ability 逻辑，不修改 Locomotion FSM。
+- 增加第四段攻击只需增加 Config 数据或专用 Ability 逻辑，不修改 Locomotion FSM。
 - 不同帧率和模拟 Tick 下 Combo 结果一致。
 - 服务器拒绝某段输入时可关联并取消对应预表现。
 
@@ -843,7 +843,7 @@ GameplayCueStarted / Stopped
 
 验收：
 
-- 同一个 Ability Definition 可由玩家和敌人使用。
+- 同一个 Ability Config 可由玩家和敌人使用。
 - 眩晕、沉默、冷却、死亡对 AI 与玩家使用同一规则。
 - AI 测试无需启动 Input System 或 Camera。
 
@@ -921,7 +921,7 @@ GameplayCueStarted / Stopped
 
 1. 单个状态类只描述一个状态，不查询所有其他状态的内部字段。
 2. 状态转移只能经过状态机/Ability System 的一个入口。
-3. 运行时状态与只读 Definition 分离，禁止写回 `ScriptableObject`。
+3. 运行时状态与只读 Config 分离，禁止写回 `ScriptableObject`。
 4. Gameplay 时间只来自传入的 `GameplayTick`，禁止核心类直接读取 `Time.deltaTime`。
 5. 核心逻辑禁用 Coroutine、Animator State 和 Animation Event 作为权威时序。
 6. 所有长期对象关系显式注入，不使用全局 Singleton。

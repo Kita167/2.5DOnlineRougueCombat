@@ -1,14 +1,13 @@
 using System;
 using System.Collections.Generic;
 using ProjectRelay.Core;
-using ProjectRelay.Gameplay.Player;
 using UnityEngine;
 
 namespace ProjectRelay.Gameplay.Combat
 {
     /// <summary>
     /// 管理普通攻击阶段、锁定方向，并在进入 Active 时执行一次权威近战命中结算。
-    /// 本组件通过 PlayerActionStateMachine 申请动作锁，但不读取输入，也不播放动画或 VFX。
+    /// 本组件不仲裁 Player 控制状态、不读取输入，也不播放动画或 VFX。
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(CombatantIdentity))]
@@ -19,7 +18,7 @@ namespace ProjectRelay.Gameplay.Combat
 
         [SerializeField]
         [Tooltip("当前玩家普通攻击使用的只读设计参数。")]
-        private BasicAttackDefinition mDefinition;
+        private BasicAttackConfig mConfig;
 
         [SerializeField]
         [Tooltip("提供攻击者运行时身份和阵营的同对象组件。")]
@@ -29,7 +28,6 @@ namespace ProjectRelay.Gameplay.Combat
         [Tooltip("计算近战查询中心的起点；为空时使用本组件 Transform。")]
         private Transform mAttackOrigin;
 
-        private PlayerActionStateMachine mActionStateMachine;
         private MeleeHitQuery mMeleeHitQuery;
         private HashSet<Health> mHitTargets;
         private BasicAttackPhase mCurrentPhase = BasicAttackPhase.Idle;
@@ -38,8 +36,8 @@ namespace ProjectRelay.Gameplay.Combat
         private bool mIsInitialized;
         private bool mHasWarnedHitBufferCapacity;
 
-        /// <summary>获取当前使用的只读普通攻击定义。</summary>
-        public BasicAttackDefinition Definition => mDefinition;
+        /// <summary>获取当前使用的只读普通攻击配置。</summary>
+        public BasicAttackConfig Config => mConfig;
 
         /// <summary>获取执行普通攻击的战斗单位运行时身份。</summary>
         public CombatantId SourceId =>
@@ -58,7 +56,7 @@ namespace ProjectRelay.Gameplay.Combat
         /// <summary>获取攻击开始时锁定并归一化的世界空间平面方向。</summary>
         public Vector3 LockedAttackDirection => mLockedAttackDirection;
 
-        /// <summary>获取控制器是否已经绑定有效定义和玩家动作状态机。</summary>
+        /// <summary>获取控制器是否已经绑定有效攻击配置和攻击者身份。</summary>
         public bool IsInitialized => mIsInitialized;
 
         /// <summary>获取当前是否仍处于占用 Attacking 动作锁的三个攻击阶段。</summary>
@@ -84,7 +82,7 @@ namespace ProjectRelay.Gameplay.Combat
         public event Action<DamageResult> DamageConfirmed;
 
         /// <summary>
-        /// 组件禁用或场景退出时取消攻击、冷却和动作锁，防止重新启用后继承旧状态。
+        /// 组件禁用或场景退出时取消攻击和冷却，防止重新启用后继承旧状态。
         /// </summary>
         private void OnDisable()
         {
@@ -92,44 +90,31 @@ namespace ProjectRelay.Gameplay.Combat
         }
 
         /// <summary>
-        /// 使用 Inspector 中的攻击定义绑定玩家动作状态机并建立空闲状态。
+        /// 使用 Inspector 中的攻击配置建立独立的空闲攻击运行时。
         /// </summary>
-        /// <param name="_actionStateMachine">拥有玩家互斥动作状态的状态机。</param>
-        /// <returns>状态机和 Inspector 定义有效时返回 true。</returns>
-        public bool Initialize(PlayerActionStateMachine _actionStateMachine)
+        /// <returns>Inspector 配置和攻击者身份有效时返回 true。</returns>
+        public bool Initialize()
         {
-            return Initialize(_actionStateMachine, mDefinition);
+            return Initialize(mConfig);
         }
 
         /// <summary>
-        /// 显式绑定玩家动作状态机和普通攻击定义，供组合根及自动测试装配。
+        /// 显式绑定普通攻击配置，供组合根及自动测试装配。
         /// 重复初始化会先安全清理上一轮攻击运行时状态。
         /// </summary>
-        /// <param name="_actionStateMachine">拥有玩家互斥动作状态的状态机。</param>
-        /// <param name="_definition">运行期间只读的普通攻击设计参数。</param>
-        /// <returns>依赖和定义全部有效时返回 true。</returns>
-        public bool Initialize(
-            PlayerActionStateMachine _actionStateMachine,
-            BasicAttackDefinition _definition)
+        /// <param name="_config">运行期间只读的普通攻击设计参数。</param>
+        /// <returns>配置和攻击者身份全部有效时返回 true。</returns>
+        public bool Initialize(BasicAttackConfig _config)
         {
             ForceReset();
             mIsInitialized = false;
-            mActionStateMachine = null;
             mMeleeHitQuery = null;
             mHitTargets = null;
 
-            if (_actionStateMachine == null)
+            if (_config == null || !_config.IsValid)
             {
                 Debug.LogError(
-                    "[Combat] BasicAttackController 初始化失败：动作状态机为空。",
-                    this);
-                return false;
-            }
-
-            if (_definition == null || !_definition.IsValid)
-            {
-                Debug.LogError(
-                    "[Combat] BasicAttackController 初始化失败：普通攻击定义为空或包含非法配置。",
+                    "[Combat] BasicAttackController 初始化失败：普通攻击配置为空或包含非法值。",
                     this);
                 return false;
             }
@@ -155,18 +140,17 @@ namespace ProjectRelay.Gameplay.Combat
                 mAttackOrigin = transform;
             }
 
-            mActionStateMachine = _actionStateMachine;
-            mDefinition = _definition;
-            mMeleeHitQuery = new MeleeHitQuery(mDefinition.HitBufferCapacity);
-            mHitTargets = new HashSet<Health>(mDefinition.HitBufferCapacity);
+            mConfig = _config;
+            mMeleeHitQuery = new MeleeHitQuery(mConfig.HitBufferCapacity);
+            mHitTargets = new HashSet<Health>(mConfig.HitBufferCapacity);
             mHasWarnedHitBufferCapacity = false;
             mIsInitialized = true;
             return true;
         }
 
         /// <summary>
-        /// 在 Free 且无冷却时锁定攻击方向、申请 Attacking 动作锁并进入 Windup。
-        /// 拒绝不会改变阶段、计时、方向或玩家动作状态。
+        /// 在攻击运行时空闲且无冷却时锁定方向并进入 Windup。
+        /// 控制状态是否合法由调用本方法之前的 Player 控制状态机负责仲裁。
         /// </summary>
         /// <param name="_attackDirection">攻击开始时使用的世界空间方向。</param>
         /// <returns>请求被接受并启动一次攻击时返回 true。</returns>
@@ -175,11 +159,9 @@ namespace ProjectRelay.Gameplay.Combat
             if (
                 !mIsInitialized ||
                 !isActiveAndEnabled ||
-                mDefinition == null ||
-                !mDefinition.IsValid ||
-                mCurrentPhase != BasicAttackPhase.Idle ||
-                mActionStateMachine == null ||
-                !mActionStateMachine.CurrentConstraints.CanAttack)
+                mConfig == null ||
+                !mConfig.IsValid ||
+                mCurrentPhase != BasicAttackPhase.Idle)
             {
                 return false;
             }
@@ -191,19 +173,11 @@ namespace ProjectRelay.Gameplay.Combat
                 return false;
             }
 
-            if (
-                !mActionStateMachine.TryEnterAttacking(
-                    mDefinition.MovementSpeedMultiplier,
-                    _safeAttackDirection))
-            {
-                return false;
-            }
-
             mHitTargets.Clear();
             LastCandidateCount = 0;
             LastAppliedHitCount = 0;
             mLockedAttackDirection = _safeAttackDirection;
-            EnterPhase(BasicAttackPhase.Windup, mDefinition.WindupDuration);
+            EnterPhase(BasicAttackPhase.Windup, mConfig.WindupDuration);
             AdvancePhases(0.0f);
             return true;
         }
@@ -219,16 +193,6 @@ namespace ProjectRelay.Gameplay.Combat
                 return;
             }
 
-            if (
-                mActionStateMachine == null ||
-                mActionStateMachine.CurrentState == PlayerActionState.Disabled ||
-                (IsAttackInProgress &&
-                    mActionStateMachine.CurrentState != PlayerActionState.Attacking))
-            {
-                ForceReset();
-                return;
-            }
-
             float _safeDeltaTime =
                 float.IsNaN(_deltaTime) || float.IsInfinity(_deltaTime)
                     ? 0.0f
@@ -237,16 +201,11 @@ namespace ProjectRelay.Gameplay.Combat
         }
 
         /// <summary>
-        /// 取消当前攻击和冷却，释放 Attacking 动作锁并回到 Idle。
+        /// 取消当前攻击和冷却并回到 Idle。
         /// 该操作可在未初始化、重复禁用和场景清理路径中安全调用。
         /// </summary>
         public void ForceReset()
         {
-            if (mActionStateMachine != null)
-            {
-                mActionStateMachine.InterruptAttacking();
-            }
-
             mLockedAttackDirection = Vector3.zero;
             mPhaseTimeRemaining = 0.0f;
             LastCandidateCount = 0;
@@ -309,22 +268,21 @@ namespace ProjectRelay.Gameplay.Combat
         }
 
         /// <summary>
-        /// 根据当前阶段进入唯一合法的下一阶段，并在 Recovery 结束时释放动作锁。
+        /// 根据当前阶段进入唯一合法的下一阶段，并在 Recovery 结束时释放锁定方向。
         /// </summary>
         private void EnterNextPhase()
         {
             switch (mCurrentPhase)
             {
                 case BasicAttackPhase.Windup:
-                    EnterPhase(BasicAttackPhase.Active, mDefinition.ActiveDuration);
+                    EnterPhase(BasicAttackPhase.Active, mConfig.ActiveDuration);
                     break;
 
                 case BasicAttackPhase.Active:
-                    EnterPhase(BasicAttackPhase.Recovery, mDefinition.RecoveryDuration);
+                    EnterPhase(BasicAttackPhase.Recovery, mConfig.RecoveryDuration);
                     break;
 
                 case BasicAttackPhase.Recovery:
-                    mActionStateMachine.CompleteAttacking();
                     mLockedAttackDirection = Vector3.zero;
 
                     if (mHitTargets != null)
@@ -332,7 +290,7 @@ namespace ProjectRelay.Gameplay.Combat
                         mHitTargets.Clear();
                     }
 
-                    EnterPhase(BasicAttackPhase.Cooldown, mDefinition.CooldownDuration);
+                    EnterPhase(BasicAttackPhase.Cooldown, mConfig.CooldownDuration);
                     break;
 
                 case BasicAttackPhase.Cooldown:
@@ -378,7 +336,7 @@ namespace ProjectRelay.Gameplay.Combat
             BasicAttackPhase _previousPhase = mCurrentPhase;
             mCurrentPhase = _newPhase;
             StableId _attackId =
-                mDefinition != null ? mDefinition.AttackId : StableId.None;
+                mConfig != null ? mConfig.AttackId : StableId.None;
             PhaseChanged?.Invoke(_previousPhase, _newPhase, _attackId);
         }
 
@@ -390,7 +348,7 @@ namespace ProjectRelay.Gameplay.Combat
             if (
                 mMeleeHitQuery == null ||
                 mHitTargets == null ||
-                mDefinition == null ||
+                mConfig == null ||
                 mCombatantIdentity == null)
             {
                 return;
@@ -399,11 +357,11 @@ namespace ProjectRelay.Gameplay.Combat
             Transform _origin = mAttackOrigin != null ? mAttackOrigin : transform;
             Vector3 _queryCenter =
                 _origin.position +
-                mLockedAttackDirection * mDefinition.ForwardOffset;
+                mLockedAttackDirection * mConfig.ForwardOffset;
             int _candidateCount = mMeleeHitQuery.Query(
                 _queryCenter,
-                mDefinition.HitRadius,
-                mDefinition.TargetLayerMask);
+                mConfig.HitRadius,
+                mConfig.TargetLayerMask);
             LastCandidateCount = _candidateCount;
 
             if (
@@ -412,7 +370,7 @@ namespace ProjectRelay.Gameplay.Combat
             {
                 mHasWarnedHitBufferCapacity = true;
                 Debug.LogWarning(
-                    $"[Combat] 普通攻击 {mDefinition.AttackId} 的近战查询已填满 " +
+                    $"[Combat] 普通攻击 {mConfig.AttackId} 的近战查询已填满 " +
                     $"{mMeleeHitQuery.Capacity} 个候选，请检查 LayerMask 或提高缓冲容量。",
                     this);
             }
@@ -456,9 +414,9 @@ namespace ProjectRelay.Gameplay.Combat
                     _targetIdentity.Id,
                     SourceFaction,
                     _targetIdentity.Faction,
-                    mDefinition.AttackId,
+                    mConfig.AttackId,
                     DamageType.Physical,
-                    mDefinition.BaseDamage);
+                    mConfig.BaseDamage);
 
                 if (
                     _targetHealth.TryApplyDamage(

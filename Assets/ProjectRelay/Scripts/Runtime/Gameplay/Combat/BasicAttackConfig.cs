@@ -9,8 +9,8 @@ namespace ProjectRelay.Gameplay.Combat
     /// </summary>
     [CreateAssetMenu(
         fileName = "BasicAttack_Default",
-        menuName = "Project Relay/Gameplay/Basic Attack Definition")]
-    public sealed class BasicAttackDefinition : ScriptableObject
+        menuName = "Project Relay/Gameplay/Basic Attack Config")]
+    public sealed class BasicAttackConfig : ScriptableObject
     {
         private const int mMinimumHitBufferCapacity = 1;
         private const int mMaximumHitBufferCapacity = 256;
@@ -72,7 +72,7 @@ namespace ProjectRelay.Gameplay.Combat
         [Tooltip("Windup、Active 和 Recovery 期间普通移动速度的倍率。")]
         private float mMovementSpeedMultiplier = 0.5f;
 
-        /// <summary>获取攻击定义的跨资源稳定标识。</summary>
+        /// <summary>获取攻击配置的跨资源稳定标识。</summary>
         public StableId AttackId => new StableId(mAttackId);
 
         /// <summary>获取进入伤害规则前的基础伤害。</summary>

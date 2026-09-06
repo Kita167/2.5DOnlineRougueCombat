@@ -1,48 +1,41 @@
 using NUnit.Framework;
 using ProjectRelay.Core;
 using ProjectRelay.Gameplay.Combat;
-using ProjectRelay.Gameplay.Player;
 using UnityEngine;
 
 namespace ProjectRelay.Tests.EditMode.Combat
 {
     /// <summary>
-    /// 验证本地战斗命令入口对来源、攻击定义、序号和动作状态执行权威校验。
+    /// 验证本地战斗命令入口对来源、攻击配置、序号和执行器状态进行权威校验。
     /// </summary>
     public sealed class LocalCombatCommandGatewayTests
     {
         private GameObject mPlayerObject;
-        private PlayerMovementConfig mMovementConfig;
-        private BasicAttackDefinition mDefinition;
-        private PlayerActionStateMachine mStateMachine;
+        private BasicAttackConfig mConfig;
         private CombatantIdentity mIdentity;
         private BasicAttackController mAttackController;
         private LocalCombatCommandGateway mGateway;
 
         /// <summary>
-        /// 为每个测试创建完整但不依赖场景资产的本地攻击命令执行链。
+        /// 为每个测试创建不依赖 Player 控制状态机的本地攻击命令执行链。
         /// </summary>
         [SetUp]
         public void SetUp()
         {
-            mMovementConfig = ScriptableObject.CreateInstance<PlayerMovementConfig>();
-            mDefinition = ScriptableObject.CreateInstance<BasicAttackDefinition>();
-            mStateMachine = new PlayerActionStateMachine(mMovementConfig);
-            mStateMachine.SetEnabled(true);
-
+            mConfig = ScriptableObject.CreateInstance<BasicAttackConfig>();
             mPlayerObject = new GameObject("LocalCombatGatewayTestPlayer");
             mIdentity = mPlayerObject.AddComponent<CombatantIdentity>();
             mIdentity.Initialize(new CombatantId(1000UL), Faction.Player);
-            mAttackController = mPlayerObject.AddComponent<BasicAttackController>();
-            Assert.That(
-                mAttackController.Initialize(mStateMachine, mDefinition),
-                Is.True);
-            mGateway = mPlayerObject.AddComponent<LocalCombatCommandGateway>();
+            mAttackController =
+                mPlayerObject.AddComponent<BasicAttackController>();
+            Assert.That(mAttackController.Initialize(mConfig), Is.True);
+            mGateway =
+                mPlayerObject.AddComponent<LocalCombatCommandGateway>();
             Assert.That(mGateway.Initialize(mAttackController), Is.True);
         }
 
         /// <summary>
-        /// 销毁测试创建的对象和配置，避免命令序号与组件事件跨测试残留。
+        /// 销毁测试创建的对象和配置，避免命令序号跨测试残留。
         /// </summary>
         [TearDown]
         public void TearDown()
@@ -52,14 +45,9 @@ namespace ProjectRelay.Tests.EditMode.Combat
                 Object.DestroyImmediate(mPlayerObject);
             }
 
-            if (mDefinition != null)
+            if (mConfig != null)
             {
-                Object.DestroyImmediate(mDefinition);
-            }
-
-            if (mMovementConfig != null)
-            {
-                Object.DestroyImmediate(mMovementConfig);
+                Object.DestroyImmediate(mConfig);
             }
         }
 
@@ -71,13 +59,19 @@ namespace ProjectRelay.Tests.EditMode.Combat
         {
             BasicAttackRequest _request = CreateRequest(1UL);
 
-            CombatCommandResult _accepted = mGateway.SubmitBasicAttack(_request);
-            CombatCommandResult _duplicate = mGateway.SubmitBasicAttack(_request);
+            CombatCommandResult _accepted =
+                mGateway.SubmitBasicAttack(_request);
+            CombatCommandResult _duplicate =
+                mGateway.SubmitBasicAttack(_request);
 
             Assert.That(_accepted.WasProcessed, Is.True);
             Assert.That(_accepted.IsAccepted, Is.True);
-            Assert.That(_accepted.RejectionReason, Is.EqualTo(CombatCommandRejectionReason.None));
-            Assert.That(mAttackController.CurrentPhase, Is.EqualTo(BasicAttackPhase.Windup));
+            Assert.That(
+                _accepted.RejectionReason,
+                Is.EqualTo(CombatCommandRejectionReason.None));
+            Assert.That(
+                mAttackController.CurrentPhase,
+                Is.EqualTo(BasicAttackPhase.Windup));
             Assert.That(_duplicate.IsAccepted, Is.False);
             Assert.That(
                 _duplicate.RejectionReason,
@@ -92,17 +86,20 @@ namespace ProjectRelay.Tests.EditMode.Combat
         {
             BasicAttackRequest _request = new BasicAttackRequest(
                 new CombatantId(9999UL),
-                mDefinition.AttackId,
+                mConfig.AttackId,
                 Vector3.forward,
                 1UL);
 
-            CombatCommandResult _result = mGateway.SubmitBasicAttack(_request);
+            CombatCommandResult _result =
+                mGateway.SubmitBasicAttack(_request);
 
             Assert.That(_result.IsAccepted, Is.False);
             Assert.That(
                 _result.RejectionReason,
                 Is.EqualTo(CombatCommandRejectionReason.InvalidSource));
-            Assert.That(mAttackController.CurrentPhase, Is.EqualTo(BasicAttackPhase.Idle));
+            Assert.That(
+                mAttackController.CurrentPhase,
+                Is.EqualTo(BasicAttackPhase.Idle));
         }
 
         /// <summary>
@@ -117,39 +114,42 @@ namespace ProjectRelay.Tests.EditMode.Combat
                 Vector3.forward,
                 1UL);
 
-            CombatCommandResult _result = mGateway.SubmitBasicAttack(_request);
+            CombatCommandResult _result =
+                mGateway.SubmitBasicAttack(_request);
 
             Assert.That(_result.IsAccepted, Is.False);
             Assert.That(
                 _result.RejectionReason,
                 Is.EqualTo(CombatCommandRejectionReason.InvalidAttack));
-            Assert.That(mAttackController.CurrentPhase, Is.EqualTo(BasicAttackPhase.Idle));
+            Assert.That(
+                mAttackController.CurrentPhase,
+                Is.EqualTo(BasicAttackPhase.Idle));
         }
 
         /// <summary>
-        /// 验证 Dash 已占用动作状态时合法请求仍会被明确拒绝且不打断 Dash。
+        /// 验证执行器已有攻击进行时，较新的合法命令会返回 ActionNotAllowed。
         /// </summary>
         [Test]
-        public void SubmitBasicAttack_WhileDashing_ReturnsActionNotAllowed()
+        public void SubmitBasicAttack_WhileAttackInProgress_ReturnsActionNotAllowed()
         {
-            mStateMachine.TryDash(
-                Vector3.forward,
-                Vector3.forward,
-                true,
-                0.0f);
-
-            CombatCommandResult _result =
+            CombatCommandResult _first =
                 mGateway.SubmitBasicAttack(CreateRequest(1UL));
 
-            Assert.That(_result.IsAccepted, Is.False);
+            CombatCommandResult _second =
+                mGateway.SubmitBasicAttack(CreateRequest(2UL));
+
+            Assert.That(_first.IsAccepted, Is.True);
+            Assert.That(_second.IsAccepted, Is.False);
             Assert.That(
-                _result.RejectionReason,
+                _second.RejectionReason,
                 Is.EqualTo(CombatCommandRejectionReason.ActionNotAllowed));
-            Assert.That(mStateMachine.CurrentState, Is.EqualTo(PlayerActionState.Dashing));
+            Assert.That(
+                mAttackController.CurrentPhase,
+                Is.EqualTo(BasicAttackPhase.Windup));
         }
 
         /// <summary>
-        /// 创建使用当前玩家身份和普通攻击定义的合法请求。
+        /// 创建使用当前玩家身份和普通攻击配置的合法请求。
         /// </summary>
         /// <param name="_sequence">需要写入请求的本地序号。</param>
         /// <returns>除调用方指定序号外其余字段全部合法的请求。</returns>
@@ -157,7 +157,7 @@ namespace ProjectRelay.Tests.EditMode.Combat
         {
             return new BasicAttackRequest(
                 mIdentity.Id,
-                mDefinition.AttackId,
+                mConfig.AttackId,
                 Vector3.forward,
                 _sequence);
         }

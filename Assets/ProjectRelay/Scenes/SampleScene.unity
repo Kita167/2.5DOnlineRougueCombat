@@ -465,6 +465,8 @@ MonoBehaviour:
   mInputSource: {fileID: 1309302423}
   mGameplayCamera: {fileID: 330585545}
   mCameraController: {fileID: 1544269866}
+  mBasicAttackController: {fileID: 2159334629734132362}
+  mCombatCommandGateway: {fileID: 2159334629734132361}
 --- !u!4 &852476077
 Transform:
   m_ObjectHideFlags: 0
@@ -831,6 +833,28 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 782f4df2777e0684f9cfbacc85c0d943, type: 3}
+--- !u!114 &2159334629734132361 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 5729763867710098552, guid: 782f4df2777e0684f9cfbacc85c0d943, type: 3}
+  m_PrefabInstance: {fileID: 2159334629734132360}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c68d72b44d964273887bdc1e571e4aa3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Game.Runtime::ProjectRelay.Gameplay.Combat.LocalCombatCommandGateway
+--- !u!114 &2159334629734132362 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 1528556833605487568, guid: 782f4df2777e0684f9cfbacc85c0d943, type: 3}
+  m_PrefabInstance: {fileID: 2159334629734132360}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a09248fdcbe74412a56f0d1dac332c73, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Game.Runtime::ProjectRelay.Gameplay.Combat.BasicAttackController
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

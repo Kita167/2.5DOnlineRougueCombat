@@ -66,7 +66,7 @@ namespace ProjectRelay.Gameplay.Player
             mAnimator.SetFloat(mSpeedParameterId, mPlayerController.NormalizedHorizontalSpeed);
             mAnimator.SetBool(
                 mIsDashingParameterId,
-                mPlayerController.CurrentActionState == PlayerActionState.Dashing);
+                mPlayerController.CurrentControlState == PlayerControlStateId.Dash);
         }
     }
 }

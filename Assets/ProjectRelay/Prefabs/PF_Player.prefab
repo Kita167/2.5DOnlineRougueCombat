@@ -14,6 +14,9 @@ GameObject:
   - component: {fileID: 5356450144025736274}
   - component: {fileID: 2287293522354405739}
   - component: {fileID: 7869040539052578749}
+  - component: {fileID: 1314047941160328062}
+  - component: {fileID: 1528556833605487568}
+  - component: {fileID: 5729763867710098552}
   m_Layer: 6
   m_Name: PF_Player
   m_TagString: Untagged
@@ -89,6 +92,8 @@ MonoBehaviour:
   mMovementConfig: {fileID: 11400000, guid: 7a3f5aa9e88f68543b022a3ddadefa7f, type: 2}
   mMotor: {fileID: 996771253788472981}
   mFacingController: {fileID: 7869040539052578749}
+  mBasicAttackController: {fileID: 1528556833605487568}
+  mLocalCombatCommandGateway: {fileID: 5729763867710098552}
 --- !u!114 &2287293522354405739
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -114,6 +119,47 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Game.Runtime::ProjectRelay.Gameplay.Player.PlayerFacingController
   mFacingTransform: {fileID: 7534485213195497906}
+--- !u!114 &1314047941160328062
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4235770511632486908}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bb7d0a13318447dc839cc16bac5ef88a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Game.Runtime::ProjectRelay.Gameplay.Combat.CombatantIdentity
+  mFaction: 1
+--- !u!114 &1528556833605487568
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4235770511632486908}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a09248fdcbe74412a56f0d1dac332c73, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Game.Runtime::ProjectRelay.Gameplay.Combat.BasicAttackController
+  mConfig: {fileID: 11400000, guid: 1d44005a57f637b4d9bacf59e0663494, type: 2}
+  mCombatantIdentity: {fileID: 1314047941160328062}
+  mAttackOrigin: {fileID: 3586985303549845627}
+--- !u!114 &5729763867710098552
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4235770511632486908}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c68d72b44d964273887bdc1e571e4aa3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Game.Runtime::ProjectRelay.Gameplay.Combat.LocalCombatCommandGateway
+  mBasicAttackController: {fileID: 1528556833605487568}
 --- !u!1 &5366978931723362586
 GameObject:
   m_ObjectHideFlags: 0

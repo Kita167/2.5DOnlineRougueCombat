@@ -63,7 +63,7 @@ namespace ProjectRelay.Gameplay.Combat
         }
 
         /// <summary>
-        /// 验证来源、攻击定义、方向和本地序号，然后同步尝试启动普通攻击。
+        /// 验证来源、攻击配置、方向和本地序号，然后同步尝试启动普通攻击。
         /// </summary>
         /// <param name="_request">玩家控制器提交的不可变普通攻击请求。</param>
         /// <returns>请求是否接受以及失败时的确定性原因。</returns>
@@ -90,8 +90,8 @@ namespace ProjectRelay.Gameplay.Combat
             }
 
             StableId _expectedAttackId =
-                mBasicAttackController.Definition != null
-                    ? mBasicAttackController.Definition.AttackId
+                mBasicAttackController.Config != null
+                    ? mBasicAttackController.Config.AttackId
                     : StableId.None;
 
             if (!_request.AttackId.IsValid || _request.AttackId != _expectedAttackId)

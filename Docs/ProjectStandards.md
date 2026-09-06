@@ -1,6 +1,6 @@
 # Project Relay 项目开发规范
 
-> 文档版本：v1.1
+> 文档版本：v1.2
 > 生效日期：2026-09-06
 > 适用范围：项目自有代码、资源、场景、配置、测试与文档  
 > Unity 版本基线：`6000.3.23f1`
@@ -366,7 +366,7 @@ ProjectRelay.Tests.EditMode
 | public 事件 | PascalCase | `Died`、`StateChanged` |
 | 方法传入参数 | `_` + camelCase | `_damageContext`、`_deltaTime` |
 | 方法内 local variable | `_` + camelCase | `_targetPosition`、`_index` |
-| 泛型类型参数 | `T` + PascalCase | `TValue`、`TDefinition` |
+| 泛型类型参数 | `T` + PascalCase | `TValue`、`TConfig` |
 | bool | 使用 Is/Has/Can/Should 表意 | `mIsGrounded`、`CanDash`、`_hasTarget` |
 
 ### 7.2 公有字段限制
@@ -592,12 +592,12 @@ Input/AI Intent → Controller → Authority/Rules → Result/Event → Presenta
 
 ### 11.4 数据分类
 
-- Definition：ScriptableObject，编辑期创建、运行时只读。
+- Config：ScriptableObject，编辑期创建、运行时只读；项目自有类型统一使用 `Config` 后缀。
 - Runtime State：组件或普通对象持有，只在本局/本次运行存在。
 - Save Data：纯 DTO，不含 UnityEngine.Object 引用。
 - Network State：只同步远端需要且具有明确所有权的状态。
 
-禁止运行时直接修改共享 ScriptableObject 资产。需要动态数值时，从 Definition 读取基础值并计算 Runtime 值。
+禁止运行时直接修改共享 ScriptableObject 资产。需要动态数值时，从 Config 读取基础值并计算 Runtime 值。
 
 ### 11.5 稳定 ID
 

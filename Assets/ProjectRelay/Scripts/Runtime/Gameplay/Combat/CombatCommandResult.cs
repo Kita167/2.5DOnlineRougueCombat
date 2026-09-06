@@ -18,7 +18,7 @@ namespace ProjectRelay.Gameplay.Combat
         /// <summary>获取命令来源的运行时身份。</summary>
         public CombatantId SourceId { get; }
 
-        /// <summary>获取命令使用的稳定攻击定义标识。</summary>
+        /// <summary>获取命令使用的稳定攻击配置标识。</summary>
         public StableId AttackId { get; }
 
         /// <summary>获取命令携带的本地请求序号。</summary>

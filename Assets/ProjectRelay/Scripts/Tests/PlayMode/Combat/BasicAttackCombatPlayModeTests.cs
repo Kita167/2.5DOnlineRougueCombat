@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using ProjectRelay.Core;
 using ProjectRelay.Gameplay.Combat;
-using ProjectRelay.Gameplay.Player;
 using UnityEngine;
 using UnityEngine.TestTools;
 
@@ -17,23 +16,18 @@ namespace ProjectRelay.Tests.PlayMode.Combat
     {
         private readonly List<GameObject> mCreatedObjects = new List<GameObject>();
 
-        private PlayerMovementConfig mMovementConfig;
-        private BasicAttackDefinition mDefinition;
-        private PlayerActionStateMachine mStateMachine;
+        private BasicAttackConfig mConfig;
         private GameObject mAttackerObject;
         private CombatantIdentity mAttackerIdentity;
         private BasicAttackController mAttackController;
 
         /// <summary>
-        /// 为每个测试建立独立攻击定义、动作状态机和有效玩家攻击者。
+        /// 为每个测试建立独立攻击配置和有效玩家攻击者。
         /// </summary>
         [UnitySetUp]
         public IEnumerator SetUp()
         {
-            mMovementConfig = ScriptableObject.CreateInstance<PlayerMovementConfig>();
-            mDefinition = ScriptableObject.CreateInstance<BasicAttackDefinition>();
-            mStateMachine = new PlayerActionStateMachine(mMovementConfig);
-            mStateMachine.SetEnabled(true);
+            mConfig = ScriptableObject.CreateInstance<BasicAttackConfig>();
 
             mAttackerObject = CreateObject("BasicAttackPlayModeAttacker", Vector3.zero);
             mAttackerIdentity = mAttackerObject.AddComponent<CombatantIdentity>();
@@ -43,7 +37,7 @@ namespace ProjectRelay.Tests.PlayMode.Combat
             mAttackerObject.AddComponent<SphereCollider>();
             mAttackController = mAttackerObject.AddComponent<BasicAttackController>();
             Assert.That(
-                mAttackController.Initialize(mStateMachine, mDefinition),
+                mAttackController.Initialize(mConfig),
                 Is.True);
 
             Physics.SyncTransforms();
@@ -68,14 +62,9 @@ namespace ProjectRelay.Tests.PlayMode.Combat
 
             mCreatedObjects.Clear();
 
-            if (mDefinition != null)
+            if (mConfig != null)
             {
-                Object.Destroy(mDefinition);
-            }
-
-            if (mMovementConfig != null)
-            {
-                Object.Destroy(mMovementConfig);
+                Object.Destroy(mConfig);
             }
 
             yield return null;
@@ -98,11 +87,11 @@ namespace ProjectRelay.Tests.PlayMode.Combat
             Physics.SyncTransforms();
 
             Assert.That(mAttackController.TryStartAttack(Vector3.forward), Is.True);
-            mAttackController.Tick(mDefinition.WindupDuration);
+            mAttackController.Tick(mConfig.WindupDuration);
 
             Assert.That(
                 _targetHealth.CurrentHealth,
-                Is.EqualTo(_targetHealth.MaximumHealth - mDefinition.BaseDamage));
+                Is.EqualTo(_targetHealth.MaximumHealth - mConfig.BaseDamage));
             Assert.That(_confirmedDamageCount, Is.EqualTo(1));
             Assert.That(mAttackController.LastAppliedHitCount, Is.EqualTo(1));
             Assert.That(
@@ -152,7 +141,7 @@ namespace ProjectRelay.Tests.PlayMode.Combat
             Physics.SyncTransforms();
 
             Assert.That(mAttackController.TryStartAttack(Vector3.forward), Is.True);
-            mAttackController.Tick(mDefinition.WindupDuration);
+            mAttackController.Tick(mConfig.WindupDuration);
 
             Assert.That(
                 _friendlyHealth.CurrentHealth,
@@ -166,19 +155,17 @@ namespace ProjectRelay.Tests.PlayMode.Combat
         }
 
         /// <summary>
-        /// 验证组件在攻击中途禁用会释放动作锁并清空阶段，重新启用后可以安全发起新攻击。
+        /// 验证组件在攻击中途禁用会清空阶段，重新启用后可以安全发起新攻击。
         /// </summary>
         [UnityTest]
         public IEnumerator Enabled_DuringAttackDisableAndEnable_ResetsThenAllowsNewAttack()
         {
             Assert.That(mAttackController.TryStartAttack(Vector3.forward), Is.True);
-            Assert.That(mStateMachine.CurrentState, Is.EqualTo(PlayerActionState.Attacking));
 
             mAttackController.enabled = false;
 
             Assert.That(mAttackController.CurrentPhase, Is.EqualTo(BasicAttackPhase.Idle));
             Assert.That(mAttackController.LockedAttackDirection, Is.EqualTo(Vector3.zero));
-            Assert.That(mStateMachine.CurrentState, Is.EqualTo(PlayerActionState.Free));
 
             mAttackController.enabled = true;
             Assert.That(mAttackController.TryStartAttack(Vector3.right), Is.True);
