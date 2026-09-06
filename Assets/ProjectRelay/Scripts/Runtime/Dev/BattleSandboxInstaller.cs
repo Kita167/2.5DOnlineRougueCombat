@@ -1,3 +1,4 @@
+using ProjectRelay.Gameplay.Combat;
 using ProjectRelay.Gameplay.Player;
 using ProjectRelay.Input;
 using ProjectRelay.Presentation.Camera;
@@ -28,6 +29,14 @@ namespace ProjectRelay.Dev
         [Tooltip("BattleSandbox 中负责跟随本地玩家的 CameraRig 控制器。")]
         private TopDownCameraController mCameraController;
 
+        [SerializeField]
+        [Tooltip("BattleSandbox 中本地玩家的普通攻击阶段与命中执行器。")]
+        private BasicAttackController mBasicAttackController;
+
+        [SerializeField]
+        [Tooltip("将本地玩家攻击请求同步交给攻击执行器的权威入口。")]
+        private LocalCombatCommandGateway mCombatCommandGateway;
+
         private bool mIsInstalled;
 
         /// <summary>
@@ -39,15 +48,27 @@ namespace ProjectRelay.Dev
                 mPlayerController == null ||
                 mInputSource == null ||
                 mGameplayCamera == null ||
-                mCameraController == null)
+                mCameraController == null ||
+                mBasicAttackController == null ||
+                mCombatCommandGateway == null)
             {
                 Debug.LogError(
-                    "[Gameplay] BattleSandboxInstaller 缺少 PlayerController、InputSource、Camera 或 CameraController 引用。",
+                    "[Gameplay] BattleSandboxInstaller 缺少玩家、输入、相机或战斗组件引用。",
                     this);
                 return;
             }
 
-            mIsInstalled = mPlayerController.Initialize(mInputSource, mGameplayCamera);
+            mIsInstalled =
+                mCombatCommandGateway.Initialize(mBasicAttackController);
+
+            if (mIsInstalled)
+            {
+                mIsInstalled = mPlayerController.Initialize(
+                    mInputSource,
+                    mGameplayCamera,
+                    mBasicAttackController,
+                    mCombatCommandGateway);
+            }
 
             if (mIsInstalled)
             {

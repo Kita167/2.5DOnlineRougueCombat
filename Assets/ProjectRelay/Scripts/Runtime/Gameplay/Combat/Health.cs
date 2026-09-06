@@ -33,6 +33,11 @@ namespace ProjectRelay.Gameplay.Combat
         public float MaximumHealth => mMaximumHealth;
 
         /// <summary>
+        /// 获取与生命状态绑定的同对象战斗身份，供权威命中执行层读取。
+        /// </summary>
+        public CombatantIdentity Identity => mCombatantIdentity;
+
+        /// <summary>
         /// 获取最近一次已确认结算后的当前生命值。
         /// </summary>
         public float CurrentHealth => mCurrentHealth;

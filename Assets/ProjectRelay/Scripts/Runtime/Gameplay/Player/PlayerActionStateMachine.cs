@@ -4,8 +4,8 @@ using UnityEngine;
 namespace ProjectRelay.Gameplay.Player
 {
     /// <summary>
-    /// 管理玩家 Free、Dashing 和 Disabled 移动状态，以及冲刺方向、计时、冷却和输入缓存。
-    /// 本类只输出目标水平速度，不读取设备输入，也不直接移动场景对象。
+    /// 管理玩家 Disabled、Free、Dashing 和 Attacking 互斥状态及其动作约束。
+    /// 本类只仲裁动作和输出目标水平速度，不推进攻击阶段，也不包含伤害或命中规则。
     /// </summary>
     public sealed class PlayerActionStateMachine
     {
@@ -19,12 +19,19 @@ namespace ProjectRelay.Gameplay.Player
         private float mDashCooldownRemaining;
         private float mDashInputBufferRemaining;
         private bool mHasBufferedDash;
+        private Vector3 mLockedAttackDirection;
+        private float mAttackMovementSpeedMultiplier;
 
         /// <summary>
-        /// 获取当前互斥移动状态；新实例和强制重置后的状态均为 Disabled。
+        /// 获取当前互斥动作状态；新实例和强制重置后的状态均为 Disabled。
         /// </summary>
         public PlayerActionState CurrentState { get; private set; } =
             PlayerActionState.Disabled;
+
+        /// <summary>
+        /// 获取当前状态对移动、转向、冲刺和攻击施加的只读约束。
+        /// </summary>
+        public PlayerActionConstraints CurrentConstraints => CreateCurrentConstraints();
 
         /// <summary>
         /// 使用只读移动配置创建状态机，运行时计时不会写回该配置资源。
@@ -38,7 +45,9 @@ namespace ProjectRelay.Gameplay.Player
         }
 
         /// <summary>
-        /// 推进状态计时、处理冲刺意图，并输出当前状态允许的世界空间水平速度。
+        /// 使用兼容入口推进状态计时、处理冲刺意图，并输出当前状态允许的世界空间水平速度。
+        /// 新的协调代码可分别调用 AdvanceTime、TryDash 和 CalculateHorizontalVelocity，
+        /// 以便在最终速度计算前插入攻击等其他动作转移。
         /// </summary>
         /// <param name="_moveDirection">长度不超过 1 的当前世界空间移动方向。</param>
         /// <param name="_currentFacingDirection">没有移动输入时用于冲刺的角色实际当前朝向。</param>
@@ -57,25 +66,14 @@ namespace ProjectRelay.Gameplay.Player
                 return Vector3.zero;
             }
 
-            float _safeDeltaTime = Mathf.Max(0.0f, _deltaTime);
-            UpdateCooldown(_safeDeltaTime);
-            UpdateDashDuration(_safeDeltaTime);
-
-            if (_dashPressed)
-            {
-                BufferDashInput();
-            }
-
-            TryStartDash(_moveDirection, _currentFacingDirection);
-            AgeDashInputBuffer(_dashPressed, _safeDeltaTime);
-
-            if (CurrentState == PlayerActionState.Dashing)
-            {
-                return mDashDirection * mMovementConfig.DashSpeed;
-            }
-
-            _moveDirection.y = 0.0f;
-            return Vector3.ClampMagnitude(_moveDirection, 1.0f) * mMovementConfig.MoveSpeed;
+            float _safeDeltaTime = GetSafeDeltaTime(_deltaTime);
+            AdvanceTime(_safeDeltaTime);
+            TryDash(
+                _moveDirection,
+                _currentFacingDirection,
+                _dashPressed,
+                _safeDeltaTime);
+            return CalculateHorizontalVelocity(_moveDirection);
         }
 
         /// <summary>
@@ -109,7 +107,7 @@ namespace ProjectRelay.Gameplay.Player
         /// <summary>
         /// 设置状态机是否接受控制；启用时从 Disabled 进入 Free，禁用时执行完整重置。
         /// </summary>
-        /// <param name="_isEnabled">为 true 时允许普通移动和冲刺，为 false 时清除全部临时状态。</param>
+        /// <param name="_isEnabled">为 true 时允许玩家动作，为 false 时清除全部临时状态。</param>
         public void SetEnabled(bool _isEnabled)
         {
             if (!_isEnabled)
@@ -125,7 +123,143 @@ namespace ProjectRelay.Gameplay.Player
         }
 
         /// <summary>
-        /// 强制进入 Disabled，并清除冲刺方向、持续时间、冷却和输入缓存。
+        /// 推进冲刺持续时间和冷却；攻击阶段时间由 BasicAttackController 独立推进。
+        /// </summary>
+        /// <param name="_deltaTime">当前玩法帧使用的时间增量；负值按零处理。</param>
+        public void AdvanceTime(float _deltaTime)
+        {
+            if (CurrentState == PlayerActionState.Disabled)
+            {
+                return;
+            }
+
+            float _safeDeltaTime = GetSafeDeltaTime(_deltaTime);
+            UpdateCooldown(_safeDeltaTime);
+            UpdateDashDuration(_safeDeltaTime);
+        }
+
+        /// <summary>
+        /// 记录并尝试执行一次冲刺意图，同时维护尚未消费的冲刺输入缓存。
+        /// Attacking 状态会直接拒绝冲刺且不会把该输入保留到攻击结束后。
+        /// </summary>
+        /// <param name="_moveDirection">当前世界空间移动方向。</param>
+        /// <param name="_currentFacingDirection">没有移动输入时使用的角色当前朝向。</param>
+        /// <param name="_dashPressed">本帧是否出现新的冲刺意图。</param>
+        /// <param name="_deltaTime">输入缓存本帧经过的时间；负值按零处理。</param>
+        /// <returns>本次调用实际从其他状态进入 Dashing 时返回 true。</returns>
+        public bool TryDash(
+            Vector3 _moveDirection,
+            Vector3 _currentFacingDirection,
+            bool _dashPressed,
+            float _deltaTime)
+        {
+            if (CurrentState == PlayerActionState.Disabled)
+            {
+                ClearDashInputBuffer();
+                return false;
+            }
+
+            if (CurrentState == PlayerActionState.Attacking)
+            {
+                ClearDashInputBuffer();
+                return false;
+            }
+
+            if (_dashPressed)
+            {
+                BufferDashInput();
+            }
+
+            PlayerActionState _stateBeforeAttempt = CurrentState;
+            TryStartBufferedDash(_moveDirection, _currentFacingDirection);
+            AgeDashInputBuffer(_dashPressed, GetSafeDeltaTime(_deltaTime));
+            return
+                _stateBeforeAttempt != PlayerActionState.Dashing &&
+                CurrentState == PlayerActionState.Dashing;
+        }
+
+        /// <summary>
+        /// 在 Free 状态进入 Attacking，并锁定攻击期间的朝向和普通移动速度倍率。
+        /// </summary>
+        /// <param name="_movementSpeedMultiplier">攻击期间普通移动速度倍率，限制在 0 到 1。</param>
+        /// <param name="_lockedFacingDirection">攻击开始时需要锁定的世界空间方向。</param>
+        /// <returns>状态和方向有效且成功进入 Attacking 时返回 true。</returns>
+        public bool TryEnterAttacking(
+            float _movementSpeedMultiplier,
+            Vector3 _lockedFacingDirection)
+        {
+            if (CurrentState != PlayerActionState.Free)
+            {
+                return false;
+            }
+
+            if (
+                float.IsNaN(_movementSpeedMultiplier) ||
+                float.IsInfinity(_movementSpeedMultiplier))
+            {
+                return false;
+            }
+
+            Vector3 _safeFacingDirection =
+                GetNormalizedPlanarDirection(_lockedFacingDirection);
+
+            if (_safeFacingDirection == Vector3.zero)
+            {
+                return false;
+            }
+
+            CurrentState = PlayerActionState.Attacking;
+            mLockedAttackDirection = _safeFacingDirection;
+            mAttackMovementSpeedMultiplier = Mathf.Clamp01(_movementSpeedMultiplier);
+            ClearDashInputBuffer();
+            return true;
+        }
+
+        /// <summary>
+        /// 在攻击正常完成时从 Attacking 返回 Free，并清除全部攻击约束。
+        /// </summary>
+        /// <returns>调用前确实处于 Attacking 且完成了转移时返回 true。</returns>
+        public bool CompleteAttacking()
+        {
+            return ExitAttacking();
+        }
+
+        /// <summary>
+        /// 在攻击被禁用或强制取消时从 Attacking 返回 Free，并清除全部攻击约束。
+        /// </summary>
+        /// <returns>调用前确实处于 Attacking 且完成了转移时返回 true。</returns>
+        public bool InterruptAttacking()
+        {
+            return ExitAttacking();
+        }
+
+        /// <summary>
+        /// 根据当前动作状态和移动输入计算最终世界空间水平速度。
+        /// </summary>
+        /// <param name="_moveDirection">长度可超过 1 的世界空间移动方向。</param>
+        /// <returns>应用冲刺速度或当前普通移动倍率后的水平速度。</returns>
+        public Vector3 CalculateHorizontalVelocity(Vector3 _moveDirection)
+        {
+            if (CurrentState == PlayerActionState.Disabled)
+            {
+                return Vector3.zero;
+            }
+
+            if (CurrentState == PlayerActionState.Dashing)
+            {
+                return mDashDirection * mMovementConfig.DashSpeed;
+            }
+
+            _moveDirection.y = 0.0f;
+            Vector3 _normalizedMoveDirection = Vector3.ClampMagnitude(_moveDirection, 1.0f);
+            return
+                _normalizedMoveDirection *
+                mMovementConfig.MoveSpeed *
+                CurrentConstraints.MovementSpeedMultiplier;
+        }
+
+        /// <summary>
+        /// 强制进入 Disabled，并清除冲刺、攻击约束、计时、冷却和输入缓存。
         /// </summary>
         public void ForceReset()
         {
@@ -133,6 +267,7 @@ namespace ProjectRelay.Gameplay.Player
             mDashDirection = Vector3.zero;
             mDashTimeRemaining = 0.0f;
             mDashCooldownRemaining = 0.0f;
+            ClearAttackConstraints();
             ClearDashInputBuffer();
         }
 
@@ -212,7 +347,9 @@ namespace ProjectRelay.Gameplay.Player
         /// </summary>
         /// <param name="_moveDirection">当前世界空间移动方向。</param>
         /// <param name="_currentFacingDirection">没有移动输入时使用的角色实际当前朝向。</param>
-        private void TryStartDash(Vector3 _moveDirection, Vector3 _currentFacingDirection)
+        private void TryStartBufferedDash(
+            Vector3 _moveDirection,
+            Vector3 _currentFacingDirection)
         {
             if (
                 CurrentState != PlayerActionState.Free ||
@@ -274,6 +411,77 @@ namespace ProjectRelay.Gameplay.Player
         }
 
         /// <summary>
+        /// 正常完成或中断攻击时集中离开 Attacking，避免外部直接修改 CurrentState。
+        /// </summary>
+        /// <returns>成功离开 Attacking 时返回 true。</returns>
+        private bool ExitAttacking()
+        {
+            if (CurrentState != PlayerActionState.Attacking)
+            {
+                return false;
+            }
+
+            CurrentState = PlayerActionState.Free;
+            ClearAttackConstraints();
+            return true;
+        }
+
+        /// <summary>
+        /// 清除只属于当前攻击的锁定朝向和移动倍率。
+        /// </summary>
+        private void ClearAttackConstraints()
+        {
+            mLockedAttackDirection = Vector3.zero;
+            mAttackMovementSpeedMultiplier = 0.0f;
+        }
+
+        /// <summary>
+        /// 根据当前互斥状态创建供 Controller 和表现层读取的动作约束。
+        /// </summary>
+        /// <returns>与当前状态一致的只读约束。</returns>
+        private PlayerActionConstraints CreateCurrentConstraints()
+        {
+            switch (CurrentState)
+            {
+                case PlayerActionState.Free:
+                    return new PlayerActionConstraints(
+                        1.0f,
+                        true,
+                        true,
+                        true,
+                        false,
+                        Vector3.zero);
+
+                case PlayerActionState.Dashing:
+                    return new PlayerActionConstraints(
+                        0.0f,
+                        false,
+                        false,
+                        false,
+                        true,
+                        mDashDirection);
+
+                case PlayerActionState.Attacking:
+                    return new PlayerActionConstraints(
+                        mAttackMovementSpeedMultiplier,
+                        false,
+                        false,
+                        false,
+                        true,
+                        mLockedAttackDirection);
+
+                default:
+                    return new PlayerActionConstraints(
+                        0.0f,
+                        false,
+                        false,
+                        false,
+                        false,
+                        Vector3.zero);
+            }
+        }
+
+        /// <summary>
         /// 将任意方向投影到 XZ 平面，并在方向有效时返回单位向量。
         /// </summary>
         /// <param name="_direction">需要处理的世界空间方向。</param>
@@ -282,9 +490,30 @@ namespace ProjectRelay.Gameplay.Player
         {
             _direction.y = 0.0f;
 
+            if (
+                float.IsNaN(_direction.x) ||
+                float.IsInfinity(_direction.x) ||
+                float.IsNaN(_direction.z) ||
+                float.IsInfinity(_direction.z))
+            {
+                return Vector3.zero;
+            }
+
             return _direction.sqrMagnitude > mMinimumDirectionSqrMagnitude
                 ? _direction.normalized
                 : Vector3.zero;
+        }
+
+        /// <summary>
+        /// 将非法或负的时间增量转换为零，防止计时状态传播 NaN 或无穷值。
+        /// </summary>
+        /// <param name="_deltaTime">调用方提供的时间增量。</param>
+        /// <returns>有限且非负的时间增量。</returns>
+        private static float GetSafeDeltaTime(float _deltaTime)
+        {
+            return float.IsNaN(_deltaTime) || float.IsInfinity(_deltaTime)
+                ? 0.0f
+                : Mathf.Max(0.0f, _deltaTime);
         }
     }
 }

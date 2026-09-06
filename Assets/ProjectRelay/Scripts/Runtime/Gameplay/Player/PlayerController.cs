@@ -1,16 +1,19 @@
+using ProjectRelay.Gameplay.Combat;
 using ProjectRelay.Input;
 using UnityEngine;
 
 namespace ProjectRelay.Gameplay.Player
 {
     /// <summary>
-    /// 消费玩家输入并协调相机相对方向、移动状态、角色朝向与 PlayerMotor。
+    /// 消费玩家输入并协调相机相对方向、动作状态、普通攻击、角色朝向与 PlayerMotor。
     /// 本组件不拥有 Input Actions，也不直接修改玩家 Transform。
-    /// 后续只负责把技能输入和移动约束交给独立模块，不承载技能或伤害规则。
+    /// 攻击意图只通过 ICombatCommandGateway 提交，本组件不查询目标或计算伤害。
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerMotor))]
     [RequireComponent(typeof(PlayerFacingController))]
+    [RequireComponent(typeof(BasicAttackController))]
+    [RequireComponent(typeof(LocalCombatCommandGateway))]
     public sealed class PlayerController : MonoBehaviour
     {
         [SerializeField]
@@ -25,10 +28,20 @@ namespace ProjectRelay.Gameplay.Player
         [Tooltip("负责根据最终移动方向旋转玩家的朝向组件。")]
         private PlayerFacingController mFacingController;
 
+        [SerializeField]
+        [Tooltip("推进普通攻击阶段并向动作状态机申请 Attacking 的同对象组件。")]
+        private BasicAttackController mBasicAttackController;
+
+        [SerializeField]
+        [Tooltip("BattleSandbox 使用的本地权威战斗命令入口。")]
+        private LocalCombatCommandGateway mLocalCombatCommandGateway;
+
         private IPlayerInputSource mInputSource;
+        private ICombatCommandGateway mCombatCommandGateway;
         private Camera mGameplayCamera;
         private PlayerActionStateMachine mActionStateMachine;
         private bool mIsControlEnabled;
+        private ulong mNextAttackRequestSequence;
 
         /// <summary>
         /// 获取控制器是否已经绑定输入源和 Gameplay Camera。
@@ -42,6 +55,19 @@ namespace ProjectRelay.Gameplay.Player
             mActionStateMachine != null
                 ? mActionStateMachine.CurrentState
                 : PlayerActionState.Disabled;
+
+        /// <summary>
+        /// 获取当前普通攻击阶段，供调试和表现层只读观察。
+        /// </summary>
+        public BasicAttackPhase CurrentAttackPhase =>
+            mBasicAttackController != null
+                ? mBasicAttackController.CurrentPhase
+                : BasicAttackPhase.Idle;
+
+        /// <summary>
+        /// 获取最近一次实际提交到 Gateway 的普通攻击命令结果。
+        /// </summary>
+        public CombatCommandResult LastAttackCommandResult { get; private set; }
 
         /// <summary>
         /// 获取实际水平速度相对当前状态目标速度的 0 到 1 归一化值。
@@ -84,6 +110,16 @@ namespace ProjectRelay.Gameplay.Player
                 mFacingController = GetComponent<PlayerFacingController>();
             }
 
+            if (mBasicAttackController == null)
+            {
+                mBasicAttackController = GetComponent<BasicAttackController>();
+            }
+
+            if (mLocalCombatCommandGateway == null)
+            {
+                mLocalCombatCommandGateway = GetComponent<LocalCombatCommandGateway>();
+            }
+
             if (mMovementConfig == null)
             {
                 Debug.LogError(
@@ -108,10 +144,11 @@ namespace ProjectRelay.Gameplay.Player
         }
 
         /// <summary>
-        /// 每帧把本地移动输入转换为世界方向，更新角色朝向并让 PlayerMotor 处理实际移动。
+        /// 每帧按固定顺序推进动作、处理 Dash/Attack，再更新朝向和执行唯一一次位移。
         /// </summary>
         private void Update()
         {
+            //依赖检查
             if (
                 !IsInitialized ||
                 mMovementConfig == null ||
@@ -123,12 +160,15 @@ namespace ProjectRelay.Gameplay.Player
                 return;
             }
 
+            //数据处理
             bool _canReadInput = mIsControlEnabled && mInputSource.IsEnabled;
             Vector2 _moveInput =
                 _canReadInput
                     ? mInputSource.Move
                     : Vector2.zero;
             bool _dashPressed = _canReadInput && mInputSource.ConsumeDashPressed();
+            bool _attackPressed = _canReadInput && mInputSource.ConsumeAttackPressed();
+            float _deltaTime = Time.deltaTime;
 
             Transform _cameraTransform = mGameplayCamera.transform;
             Vector3 _worldDirection = PlayerMovementMath.GetCameraRelativeDirection(
@@ -136,23 +176,45 @@ namespace ProjectRelay.Gameplay.Player
                 _cameraTransform.forward,
                 _cameraTransform.right);
 
-            Vector3 _horizontalVelocity = mActionStateMachine.Tick(
+            //更新链路
+            mActionStateMachine.AdvanceTime(_deltaTime);
+            mBasicAttackController.Tick(_deltaTime);
+
+            bool _didStartDash = mActionStateMachine.TryDash(
                 _worldDirection,
                 mFacingController.CurrentFacingDirection,
                 _dashPressed,
-                Time.deltaTime);
+                _deltaTime);
+
+            if (
+                _attackPressed &&
+                !_didStartDash &&
+                mActionStateMachine.CurrentState == PlayerActionState.Free)
+            {
+                SubmitBasicAttack();
+            }
+
+            PlayerActionConstraints _constraints =
+                mActionStateMachine.CurrentConstraints;
+            Vector3 _horizontalVelocity =
+                mActionStateMachine.CalculateHorizontalVelocity(_worldDirection);
+            Vector3 _facingDirection = _constraints.HasLockedFacingDirection
+                ? _constraints.LockedFacingDirection
+                : _constraints.CanTurn
+                    ? _horizontalVelocity
+                    : Vector3.zero;
 
             mFacingController.TickFacing(
-                _horizontalVelocity,
+                _facingDirection,
                 mMovementConfig.RotationSpeed,
-                Time.deltaTime);
+                _deltaTime);
 
             mMotor.TickMovement(
                 _horizontalVelocity,
                 mMovementConfig.Gravity,
                 mMovementConfig.MaximumFallSpeed,
                 mMovementConfig.GroundedVerticalSpeed,
-                Time.deltaTime);
+                _deltaTime);
 
             mActionStateMachine.ReportMovementResult(
                 mMotor.HorizontalVelocity,
@@ -174,6 +236,11 @@ namespace ProjectRelay.Gameplay.Player
                 mMotor.ResetMotion();
             }
 
+            if (mBasicAttackController != null)
+            {
+                mBasicAttackController.ForceReset();
+            }
+
             if (mActionStateMachine != null)
             {
                 mActionStateMachine.ForceReset();
@@ -188,6 +255,34 @@ namespace ProjectRelay.Gameplay.Player
         /// <returns>依赖和配置全部有效时返回 true。</returns>
         public bool Initialize(IPlayerInputSource _inputSource, Camera _gameplayCamera)
         {
+            if (
+                mLocalCombatCommandGateway != null &&
+                !mLocalCombatCommandGateway.IsReady)
+            {
+                mLocalCombatCommandGateway.Initialize(mBasicAttackController);
+            }
+
+            return Initialize(
+                _inputSource,
+                _gameplayCamera,
+                mBasicAttackController,
+                mLocalCombatCommandGateway);
+        }
+
+        /// <summary>
+        /// 显式绑定输入、相机、攻击执行器和命令 Gateway，并建立共享动作状态。
+        /// </summary>
+        /// <param name="_inputSource">只表达玩家意图的输入源。</param>
+        /// <param name="_gameplayCamera">提供相机相对移动基准的场景 Camera。</param>
+        /// <param name="_basicAttackController">需要由本控制器逐帧推进的攻击执行器。</param>
+        /// <param name="_combatCommandGateway">接收普通攻击值类型请求的权威入口。</param>
+        /// <returns>全部依赖、配置和战斗组件就绪时返回 true。</returns>
+        public bool Initialize(
+            IPlayerInputSource _inputSource,
+            Camera _gameplayCamera,
+            BasicAttackController _basicAttackController,
+            ICombatCommandGateway _combatCommandGateway)
+        {
             if (_inputSource == null)
             {
                 Debug.LogError("[Gameplay] PlayerController 初始化失败：输入源为空。", this);
@@ -197,6 +292,22 @@ namespace ProjectRelay.Gameplay.Player
             if (_gameplayCamera == null)
             {
                 Debug.LogError("[Gameplay] PlayerController 初始化失败：Gameplay Camera 为空。", this);
+                return false;
+            }
+
+            if (_basicAttackController == null)
+            {
+                Debug.LogError(
+                    "[Gameplay] PlayerController 初始化失败：普通攻击执行器为空。",
+                    this);
+                return false;
+            }
+
+            if (_combatCommandGateway == null || !_combatCommandGateway.IsReady)
+            {
+                Debug.LogError(
+                    "[Gameplay] PlayerController 初始化失败：战斗命令 Gateway 未就绪。",
+                    this);
                 return false;
             }
 
@@ -212,8 +323,20 @@ namespace ProjectRelay.Gameplay.Player
                 return false;
             }
 
+            if (!_basicAttackController.Initialize(mActionStateMachine))
+            {
+                Debug.LogError(
+                    "[Gameplay] PlayerController 初始化失败：普通攻击执行器配置无效。",
+                    this);
+                return false;
+            }
+
             mInputSource = _inputSource;
             mGameplayCamera = _gameplayCamera;
+            mBasicAttackController = _basicAttackController;
+            mCombatCommandGateway = _combatCommandGateway;
+            mNextAttackRequestSequence = 0UL;
+            LastAttackCommandResult = default;
             IsInitialized = true;
             mActionStateMachine.ForceReset();
 
@@ -238,12 +361,60 @@ namespace ProjectRelay.Gameplay.Player
 
             bool _shouldEnableControl = _isEnabled && isActiveAndEnabled;
             mInputSource.SetInputEnabled(_shouldEnableControl);
+
+            if (!_shouldEnableControl && mBasicAttackController != null)
+            {
+                mBasicAttackController.ForceReset();
+            }
+
             mActionStateMachine.SetEnabled(_shouldEnableControl);
 
             if (!_isEnabled && mMotor != null)
             {
                 mMotor.ResetMotion();
             }
+        }
+
+        /// <summary>
+        /// 使用当前权威攻击者身份、攻击定义和锁定朝向构造值类型请求并提交 Gateway。
+        /// </summary>
+        private void SubmitBasicAttack()
+        {
+            if (
+                mCombatCommandGateway == null ||
+                !mCombatCommandGateway.IsReady ||
+                mBasicAttackController == null ||
+                mBasicAttackController.Definition == null)
+            {
+                return;
+            }
+
+            BasicAttackRequest _request = new BasicAttackRequest(
+                mBasicAttackController.SourceId,
+                mBasicAttackController.Definition.AttackId,
+                mFacingController.CurrentFacingDirection,
+                CreateNextAttackRequestSequence());
+            LastAttackCommandResult =
+                mCombatCommandGateway.SubmitBasicAttack(_request);
+        }
+
+        /// <summary>
+        /// 生成当前玩家运行期间单调递增的非零普通攻击请求序号。
+        /// </summary>
+        /// <returns>本次请求独占的非零序号。</returns>
+        private ulong CreateNextAttackRequestSequence()
+        {
+            unchecked
+            {
+                mNextAttackRequestSequence++;
+
+                if (mNextAttackRequestSequence == 0UL)
+                {
+                    mNextAttackRequestSequence++;
+                }
+            }
+
+            return mNextAttackRequestSequence;
         }
     }
 }

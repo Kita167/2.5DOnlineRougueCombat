@@ -1,8 +1,8 @@
 namespace ProjectRelay.Gameplay.Player
 {
     /// <summary>
-    /// 定义玩家移动模块中互斥的移动状态，由 PlayerLocomotionStateMachine 统一管理状态转换。
-    /// 技能施放、受击和死亡等非移动状态不属于此枚举。
+    /// 定义玩家控制期间互斥的动作状态，由 PlayerActionStateMachine 统一管理状态转换。
+    /// 攻击阶段由独立战斗控制器推进，本枚举只表达它对移动和其他动作的占用。
     /// </summary>
     public enum PlayerActionState
     {
@@ -19,6 +19,11 @@ namespace ProjectRelay.Gameplay.Player
         /// <summary>
         /// 玩家沿进入状态时锁定的方向进行冲刺。
         /// </summary>
-        Dashing = 2
+        Dashing = 2,
+
+        /// <summary>
+        /// 玩家正在执行一次攻击，移动倍率、朝向和其他动作受到攻击约束。
+        /// </summary>
+        Attacking = 3
     }
 }

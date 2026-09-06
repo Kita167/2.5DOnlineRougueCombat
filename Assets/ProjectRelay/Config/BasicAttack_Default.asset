@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 59bf7e49c52346b09e97431c84f56e2c, type: 3}
+  m_Name: BasicAttack_Default
+  m_EditorClassIdentifier: Game.Runtime::ProjectRelay.Gameplay.Combat.BasicAttackDefinition
+  mAttackId: basic-attack
+  mBaseDamage: 25
+  mWindupDuration: 0.15
+  mActiveDuration: 0.1
+  mRecoveryDuration: 0.25
+  mCooldownDuration: 0.4
+  mForwardOffset: 1
+  mHitRadius: 0.75
+  mTargetLayerMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  mHitBufferCapacity: 16
+  mMovementSpeedMultiplier: 0.5
